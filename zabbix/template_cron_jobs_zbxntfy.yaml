@@ -438,6 +438,7 @@ zabbix_export:
             - uuid: '3050404a8a8e486abba9cb1df1ef5055'
               expression: 'length(last(/Cron jobs by zbxntfy/job.error[{#JOB}]))>0 and length(last(/Cron jobs by zbxntfy/job.tail[{#JOB}]))>=0'
               name: 'Cron job {#JOB}: errors in output'
+              opdata: '{ITEM.LASTVALUE1}'
               priority: AVERAGE
               description: |
                 Command: {#CMD}
@@ -461,6 +462,7 @@ zabbix_export:
             - uuid: '107ecf8da5e74609ae5392f35fe772ed'
               expression: 'length(last(/Cron jobs by zbxntfy/job.warn[{#JOB}]))>0 and length(last(/Cron jobs by zbxntfy/job.tail[{#JOB}]))>=0'
               name: 'Cron job {#JOB}: warnings in output'
+              opdata: '{ITEM.LASTVALUE1}'
               priority: WARNING
               description: |
                 Command: {#CMD}
