@@ -1,0 +1,92 @@
+---
+- name: Map CPU architecture
+  ansible.builtin.set_fact:
+    zbxntfy_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+
+- name: Install zabbix-sender
+  ansible.builtin.package:
+    name: zabbix-sender
+    state: present
+  when: zbxntfy_install_sender | bool
+
+- name: Install setcap
+  ansible.builtin.package:
+    name: "{{ 'libcap2-bin' if ansible_facts['os_family'] == 'Debian' else 'libcap' }}"
+    state: present
+  when: zbxntfy_privilege == 'setcap'
+
+- name: Install binaries
+  ansible.builtin.copy:
+    src: "{{ zbxntfy_dist_dir }}/{{ zbxntfy_arch }}/{{ item }}"
+    dest: "{{ zbxntfy_bin_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - zbxntfy
+    - zbxntfy-discovery
+  notify: Restart zabbix agent
+
+- name: Allow zbxntfy-discovery to read user crontabs (setcap)
+  community.general.capabilities:
+    path: "{{ zbxntfy_bin_dir }}/zbxntfy-discovery"
+    capability: cap_dac_read_search+ep
+    state: present
+  when: zbxntfy_privilege == 'setcap'
+
+- name: Allow zbxntfy-discovery to read user crontabs (sudo)
+  ansible.builtin.template:
+    src: sudoers.j2
+    dest: /etc/sudoers.d/zbxntfy
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+  when: zbxntfy_privilege == 'sudo'
+
+- name: Remove sudoers rule when not used
+  ansible.builtin.file:
+    path: /etc/sudoers.d/zbxntfy
+    state: absent
+  when: zbxntfy_privilege != 'sudo'
+
+- name: Optional /etc/zbxntfy.conf
+  ansible.builtin.template:
+    src: zbxntfy.conf.j2
+    dest: /etc/zbxntfy.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: zbxntfy_config | length > 0
+
+- name: Find agent include directories
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/zabbix/zabbix_agent2.d
+    - /etc/zabbix/zabbix_agentd.d
+  register: zbxntfy_agent_dirs
+
+- name: Install UserParameter
+  ansible.builtin.template:
+    src: userparameter_zbxntfy.conf.j2
+    dest: "{{ item.item }}/userparameter_zbxntfy.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ zbxntfy_agent_dirs.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  notify: Restart zabbix agent
+
+- name: Check that discovery works as user zabbix
+  ansible.builtin.command: "{{ 'sudo -n ' if zbxntfy_privilege == 'sudo' else '' }}{{ zbxntfy_bin_dir }}/zbxntfy-discovery"
+  become: true
+  become_user: zabbix
+  changed_when: false
+  register: zbxntfy_check
+  failed_when: zbxntfy_check.rc != 0 or (zbxntfy_check.stdout | from_json).summary is not defined
+
+- name: Discovery result
+  ansible.builtin.debug:
+    msg: "{{ (zbxntfy_check.stdout | from_json).summary }} {{ (zbxntfy_check.stdout | from_json).errors }}"

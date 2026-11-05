@@ -1,0 +1,58 @@
+version: 2
+project_name: zbxntfy
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: zbxntfy
+    main: ./cmd/zbxntfy
+    binary: zbxntfy
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+  - id: zbxntfy-discovery
+    main: ./cmd/zbxntfy-discovery
+    binary: zbxntfy-discovery
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+
+archives:
+  - formats: [tar.gz]
+    files:
+      - README.md
+      - zabbix/*
+
+nfpms:
+  - package_name: zbxntfy
+    vendor: DuprTECH
+    homepage: https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor
+    maintainer: DuprTECH
+    description: Cron job monitoring for Zabbix (discovery via agent, results via zabbix_sender).
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    dependencies:
+      - zabbix-sender
+    overrides:
+      deb:
+        recommends: [libcap2-bin]
+      rpm:
+        recommends: [libcap]
+    contents:
+      - src: packaging/userparameter_zbxntfy.conf
+        dst: /usr/share/zbxntfy/userparameter_zbxntfy.conf
+      - src: zabbix/template_cron_jobs_zbxntfy.yaml
+        dst: /usr/share/zbxntfy/template_cron_jobs_zbxntfy.yaml
+    scripts:
+      postinstall: packaging/postinstall.sh
+      preremove: packaging/preremove.sh
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc

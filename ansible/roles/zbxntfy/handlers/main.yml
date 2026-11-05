@@ -1,0 +1,8 @@
+---
+- name: Restart zabbix agent
+  ansible.builtin.service:
+    name: "{{ item.item | regex_search('agent2') | ternary('zabbix-agent2', 'zabbix-agent') }}"
+    state: restarted
+  loop: "{{ zbxntfy_agent_dirs.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item }}"

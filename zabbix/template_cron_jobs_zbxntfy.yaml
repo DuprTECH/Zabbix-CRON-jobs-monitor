@@ -1,0 +1,618 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: '74a2188204b24165ae990406927a8555'
+      name: Templates/Applications
+  templates:
+    - uuid: '9e4e67e71971459985efd9b2c0e46e4f'
+      template: 'Cron jobs by zbxntfy'
+      name: 'Cron jobs by zbxntfy'
+      description: |
+        Monitors cron jobs on Linux hosts.
+
+        - Zabbix agent (active) runs zbxntfy-discovery every minute (UserParameter zbxntfy.jobs). It reads
+          /etc/crontab, /etc/cron.d/* and the user crontabs, discovers ALL cron jobs and computes when each
+          job should have run.
+        - Jobs that are not prefixed with "zbxntfy" raise "not monitored".
+        - A job prefixed with zbxntfy reports its start, exit code, duration and output via zabbix_sender:
+              0 2 * * *  zbxntfy /opt/scripts/backup.sh
+              0 3 * * *  zbxntfy -n backup-db -g IT_ops /opt/scripts/backup.sh --db
+        - Output lines matching {$JOB.ERROR.REGEX} / {$JOB.WARN.REGEX} (minus {$JOB.IGNORE.REGEX}) raise
+          problems; the alert contains the matching lines and the last {$JOB.TAIL.LINES} lines of output.
+          Regexes are JavaScript, case-insensitive; "/" must be written as "\/".
+          Per-job overrides use context macros, e.g. {$JOB.WARN.REGEX:"backup"}.
+        - Trigger tag notify:<group> comes from "zbxntfy -g <group>" (default: "default"); use it in actions
+          to route alerts to user groups.
+
+        Requires: zbxntfy, zbxntfy-discovery and zabbix_sender on the host, plus userparameter_zbxntfy.conf.
+        https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor
+      vendor:
+        name: DuprTECH
+        version: 7.0-1
+      groups:
+        - name: Templates/Applications
+      items:
+        - uuid: '325fe960848c4333b34dc5ee537c4cc3'
+          name: 'zbxntfy: Cron jobs (raw)'
+          type: ZABBIX_ACTIVE
+          key: zbxntfy.jobs
+          delay: 1m
+          history: 1h
+          value_type: TEXT
+          trends: '0'
+          description: 'Output of zbxntfy-discovery: all cron jobs, their schedule and read errors. Master item for discovery.'
+          tags:
+            - tag: component
+              value: cron
+          triggers:
+            - uuid: '9b4e608587f9409aa0628b2c5cffff1b'
+              expression: 'nodata(/Cron jobs by zbxntfy/zbxntfy.jobs,30m)=1'
+              name: 'zbxntfy: no data from zbxntfy-discovery for 30m'
+              priority: WARNING
+              description: 'Check that zbxntfy-discovery is installed, userparameter_zbxntfy.conf is loaded and the agent runs active checks for this host.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: '631e147d01bf40f79e4cc47dc3d7800a'
+          name: 'zbxntfy: Crontab read errors'
+          type: DEPENDENT
+          key: zbxntfy.errors
+          delay: '0'
+          history: 7d
+          value_type: TEXT
+          trends: '0'
+          description: 'Crontabs that could not be read or lines that could not be parsed.'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.errors
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          master_item:
+            key: zbxntfy.jobs
+          tags:
+            - tag: component
+              value: cron
+          triggers:
+            - uuid: 'b7c63fd81e194b5a9484d8c5b664e077'
+              expression: 'length(last(/Cron jobs by zbxntfy/zbxntfy.errors))>0'
+              name: 'zbxntfy: some crontabs cannot be read or parsed'
+              priority: WARNING
+              description: |
+                {ITEM.LASTVALUE}
+
+                "permission denied" on /var/spool/cron: give zbxntfy-discovery CAP_DAC_READ_SEARCH
+                (setcap cap_dac_read_search+ep /usr/local/bin/zbxntfy-discovery) or run it via sudo.
+              manual_close: 'YES'
+              tags:
+                - tag: scope
+                  value: notice
+        - uuid: '00a518d787a24a9eb48923e8fee527e3'
+          name: 'zbxntfy: Cron jobs total'
+          type: DEPENDENT
+          key: zbxntfy.jobs.total
+          delay: '0'
+          history: 31d
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.summary.total
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          master_item:
+            key: zbxntfy.jobs
+          tags:
+            - tag: component
+              value: cron
+        - uuid: '8590a61c337841588a74474ced447a99'
+          name: 'zbxntfy: Cron jobs monitored'
+          type: DEPENDENT
+          key: zbxntfy.jobs.monitored
+          delay: '0'
+          history: 31d
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.summary.monitored
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          master_item:
+            key: zbxntfy.jobs
+          tags:
+            - tag: component
+              value: cron
+        - uuid: 'fb35a2203ce2446691d35b473a78b716'
+          name: 'zbxntfy: Cron jobs not monitored'
+          type: DEPENDENT
+          key: zbxntfy.jobs.unmonitored
+          delay: '0'
+          history: 31d
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.summary.unmonitored
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          master_item:
+            key: zbxntfy.jobs
+          tags:
+            - tag: component
+              value: cron
+      discovery_rules:
+        - uuid: 'b745f7c96d8043209ae95920f46000fb'
+          name: 'Cron jobs discovery'
+          type: DEPENDENT
+          key: zbxntfy.jobs.discovery
+          delay: '0'
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: '{#JOB}'
+                value: '{$JOB.NAME.MATCHES}'
+                formulaid: A
+              - macro: '{#JOB}'
+                value: '{$JOB.NAME.NOT_MATCHES}'
+                operator: NOT_MATCHES_REGEX
+                formulaid: B
+              - macro: '{#USER}'
+                value: '{$JOB.USER.MATCHES}'
+                formulaid: C
+              - macro: '{#USER}'
+                value: '{$JOB.USER.NOT_MATCHES}'
+                operator: NOT_MATCHES_REGEX
+                formulaid: D
+          description: 'Discovers all cron jobs from /etc/crontab, /etc/cron.d and user crontabs.'
+          item_prototypes:
+            - uuid: 'd1b4716902a840ffa89ed4aa392b1fbb'
+              name: 'Cron job {#JOB}: Monitored by zbxntfy'
+              type: DEPENDENT
+              key: 'job.monitored[{#JOB}]'
+              delay: '0'
+              history: 31d
+              description: |
+                1 = the cron line runs the command through zbxntfy.
+                {#SOURCE} ({#USER}): {#SCHEDULE} {#CMD}
+              valuemap:
+                name: 'zbxntfy monitored'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.jobs[?(@.job==''{#JOB}'')].monitored.first()'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              master_item:
+                key: zbxntfy.jobs
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: 'a1e1238044914ebba005d61615405884'
+              name: 'Cron job {#JOB}: Last scheduled run'
+              type: DEPENDENT
+              key: 'job.prev[{#JOB}]'
+              delay: '0'
+              history: 7d
+              trends: '0'
+              units: unixtime
+              description: 'When the job should have started most recently, according to its cron schedule ({#SCHEDULE}).'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.schedule[''{#JOB}''].prev'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              master_item:
+                key: zbxntfy.jobs
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: 'f08475479b3a4eb7b177f7f382fbab87'
+              name: 'Cron job {#JOB}: Next scheduled run'
+              type: DEPENDENT
+              key: 'job.next[{#JOB}]'
+              delay: '0'
+              history: 7d
+              trends: '0'
+              units: unixtime
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.schedule[''{#JOB}''].next'
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              master_item:
+                key: zbxntfy.jobs
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: '104f9f4e922e4618bfd380121ab531bc'
+              name: 'Cron job {#JOB}: Last start'
+              type: TRAPPER
+              key: 'job.start[{#JOB}]'
+              history: 31d
+              trends: '0'
+              units: unixtime
+              description: 'Sent by zbxntfy when the job starts.'
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: 'f3271303b6924794a6760d8f296263e7'
+              name: 'Cron job {#JOB}: Last end'
+              type: TRAPPER
+              key: 'job.end[{#JOB}]'
+              history: 31d
+              trends: '0'
+              units: unixtime
+              description: 'Sent by zbxntfy when the job finishes.'
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: '49f275afd3374da585c52ce44157406e'
+              name: 'Cron job {#JOB}: Duration'
+              type: TRAPPER
+              key: 'job.duration[{#JOB}]'
+              history: 31d
+              value_type: FLOAT
+              units: s
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: '30a0c394b25b474c8002414dcee9b45e'
+              name: 'Cron job {#JOB}: Exit code'
+              type: TRAPPER
+              key: 'job.rc[{#JOB}]'
+              history: 31d
+              trends: '0'
+              description: 'Exit code of the last run; 127 = command not found, 126 = not executable, 128+N = killed by signal N.'
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: '4f9c7cc14f8f46a3bdee78448cecd3e7'
+              name: 'Cron job {#JOB}: Output'
+              type: TRAPPER
+              key: 'job.log[{#JOB}]'
+              history: 7d
+              value_type: TEXT
+              trends: '0'
+              description: 'stdout+stderr of the last run (tail, max 60000 bytes).'
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: 'bd0ffd904c564172a4bc17e9251b53c8'
+              name: 'Cron job {#JOB}: Error lines'
+              type: DEPENDENT
+              key: 'job.error[{#JOB}]'
+              delay: '0'
+              history: 31d
+              value_type: TEXT
+              trends: '0'
+              description: 'Output lines matching {$JOB.ERROR.REGEX} and not matching {$JOB.IGNORE.REGEX}. Empty = no errors.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var re = /(?:{$JOB.ERROR.REGEX:"{#JOB}"})/i;
+                      var ign = /(?:{$JOB.IGNORE.REGEX:"{#JOB}"})/i;
+                      if (re.source === '(?:)') return '';
+                      var useIgn = ign.source !== '(?:)';
+                      var lines = value.split(/\r?\n/), out = [], n = 0;
+                      for (var i = 0; i < lines.length; i++) {
+                        var l = lines[i];
+                        if (re.test(l) && !(useIgn && ign.test(l))) {
+                          n++;
+                          if (out.length < 30) out.push(l);
+                        }
+                      }
+                      if (n > out.length) out.push('... and ' + (n - out.length) + ' more');
+                      return out.join('\n');
+              master_item:
+                key: 'job.log[{#JOB}]'
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: 'c01cb3a951c84aa8a8d6267bcd1a5191'
+              name: 'Cron job {#JOB}: Warning lines'
+              type: DEPENDENT
+              key: 'job.warn[{#JOB}]'
+              delay: '0'
+              history: 31d
+              value_type: TEXT
+              trends: '0'
+              description: 'Output lines matching {$JOB.WARN.REGEX}, not matching {$JOB.ERROR.REGEX} or {$JOB.IGNORE.REGEX}. Empty = no warnings.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var re = /(?:{$JOB.WARN.REGEX:"{#JOB}"})/i;
+                      var err = /(?:{$JOB.ERROR.REGEX:"{#JOB}"})/i;
+                      var ign = /(?:{$JOB.IGNORE.REGEX:"{#JOB}"})/i;
+                      if (re.source === '(?:)') return '';
+                      var useErr = err.source !== '(?:)', useIgn = ign.source !== '(?:)';
+                      var lines = value.split(/\r?\n/), out = [], n = 0;
+                      for (var i = 0; i < lines.length; i++) {
+                        var l = lines[i];
+                        if (re.test(l) && !(useErr && err.test(l)) && !(useIgn && ign.test(l))) {
+                          n++;
+                          if (out.length < 30) out.push(l);
+                        }
+                      }
+                      if (n > out.length) out.push('... and ' + (n - out.length) + ' more');
+                      return out.join('\n');
+              master_item:
+                key: 'job.log[{#JOB}]'
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+            - uuid: 'df0759e784eb45adaae86fd7cb0f067a'
+              name: 'Cron job {#JOB}: Output tail'
+              type: DEPENDENT
+              key: 'job.tail[{#JOB}]'
+              delay: '0'
+              history: 7d
+              value_type: TEXT
+              trends: '0'
+              description: 'Last {$JOB.TAIL.LINES} lines of output; included in alerts as context.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var n = parseInt('{$JOB.TAIL.LINES:"{#JOB}"}', 10);
+                      if (!(n > 0)) n = 50;
+                      return value.replace(/\s+$/, '').split(/\r?\n/).slice(-n).join('\n');
+              master_item:
+                key: 'job.log[{#JOB}]'
+              tags:
+                - tag: component
+                  value: cron
+                - tag: job
+                  value: '{#JOB}'
+          trigger_prototypes:
+            - uuid: 'b2687b8e07594153936c6849825c6b1f'
+              expression: 'last(/Cron jobs by zbxntfy/job.monitored[{#JOB}])=0'
+              name: 'Cron job {#JOB}: not monitored by zbxntfy'
+              opdata: '{#USER}: {#SCHEDULE}'
+              priority: WARNING
+              description: |
+                This cron job is not wrapped with zbxntfy, so its result and output are not reported.
+
+                Source:   {#SOURCE} (user {#USER})
+                Schedule: {#SCHEDULE}
+                Command:  {#CMD}
+
+                Fix: prefix the command with zbxntfy, e.g.
+                  {#SCHEDULE}  zbxntfy <command>
+                To exclude this job, add it to {$JOB.NAME.NOT_MATCHES} on the host.
+              manual_close: 'YES'
+              tags:
+                - tag: job
+                  value: '{#JOB}'
+                - tag: notify
+                  value: '{#NOTIFY}'
+                - tag: scope
+                  value: notice
+            - uuid: '79ae2b574366448681e1c6cc1754ec54'
+              expression: 'last(/Cron jobs by zbxntfy/job.rc[{#JOB}])<>0 and length(last(/Cron jobs by zbxntfy/job.tail[{#JOB}]))>=0'
+              name: 'Cron job {#JOB}: failed with exit code {ITEM.LASTVALUE1}'
+              opdata: 'exit code {ITEM.LASTVALUE1}'
+              priority: HIGH
+              description: |
+                Command: {#CMD}
+                Schedule: {#SCHEDULE} ({#USER}, {#SOURCE})
+
+                Last output:
+                {ITEM.VALUE2}
+              manual_close: 'YES'
+              tags:
+                - tag: job
+                  value: '{#JOB}'
+                - tag: notify
+                  value: '{#NOTIFY}'
+                - tag: scope
+                  value: availability
+            - uuid: '3050404a8a8e486abba9cb1df1ef5055'
+              expression: 'length(last(/Cron jobs by zbxntfy/job.error[{#JOB}]))>0 and length(last(/Cron jobs by zbxntfy/job.tail[{#JOB}]))>=0'
+              name: 'Cron job {#JOB}: errors in output'
+              priority: AVERAGE
+              description: |
+                Command: {#CMD}
+
+                Matching lines:
+                {ITEM.VALUE1}
+
+                Last {$JOB.TAIL.LINES:"{#JOB}"} lines of output:
+                {ITEM.VALUE2}
+              manual_close: 'YES'
+              dependencies:
+                - name: 'Cron job {#JOB}: failed with exit code {ITEM.LASTVALUE1}'
+                  expression: 'last(/Cron jobs by zbxntfy/job.rc[{#JOB}])<>0 and length(last(/Cron jobs by zbxntfy/job.tail[{#JOB}]))>=0'
+              tags:
+                - tag: job
+                  value: '{#JOB}'
+                - tag: notify
+                  value: '{#NOTIFY}'
+                - tag: scope
+                  value: availability
+            - uuid: '107ecf8da5e74609ae5392f35fe772ed'
+              expression: 'length(last(/Cron jobs by zbxntfy/job.warn[{#JOB}]))>0 and length(last(/Cron jobs by zbxntfy/job.tail[{#JOB}]))>=0'
+              name: 'Cron job {#JOB}: warnings in output'
+              priority: WARNING
+              description: |
+                Command: {#CMD}
+
+                Matching lines:
+                {ITEM.VALUE1}
+
+                Last {$JOB.TAIL.LINES:"{#JOB}"} lines of output:
+                {ITEM.VALUE2}
+              manual_close: 'YES'
+              dependencies:
+                - name: 'Cron job {#JOB}: errors in output'
+                  expression: 'length(last(/Cron jobs by zbxntfy/job.error[{#JOB}]))>0 and length(last(/Cron jobs by zbxntfy/job.tail[{#JOB}]))>=0'
+                - name: 'Cron job {#JOB}: failed with exit code {ITEM.LASTVALUE1}'
+                  expression: 'last(/Cron jobs by zbxntfy/job.rc[{#JOB}])<>0 and length(last(/Cron jobs by zbxntfy/job.tail[{#JOB}]))>=0'
+              tags:
+                - tag: job
+                  value: '{#JOB}'
+                - tag: notify
+                  value: '{#NOTIFY}'
+                - tag: scope
+                  value: notice
+            - uuid: '6eaa4d4eaed346c0bc298ac195de2c3f'
+              expression: 'last(/Cron jobs by zbxntfy/job.monitored[{#JOB}])=1 and last(/Cron jobs by zbxntfy/job.prev[{#JOB}])>last(/Cron jobs by zbxntfy/job.start[{#JOB}]) and now()-last(/Cron jobs by zbxntfy/job.prev[{#JOB}])>{$JOB.GRACE:"{#JOB}"}'
+              name: 'Cron job {#JOB}: did not start on schedule'
+              opdata: 'schedule: {#SCHEDULE}'
+              priority: HIGH
+              description: |
+                According to its schedule ({#SCHEDULE}) the job should have started, but zbxntfy has not
+                reported a start within {$JOB.GRACE:"{#JOB}"}. Is cron running? Was the host down?
+
+                Command: {#CMD}
+              manual_close: 'YES'
+              tags:
+                - tag: job
+                  value: '{#JOB}'
+                - tag: notify
+                  value: '{#NOTIFY}'
+                - tag: scope
+                  value: availability
+            - uuid: '6cdae0327c424d9c9dff9b1a12c4c1f8'
+              expression: 'last(/Cron jobs by zbxntfy/job.start[{#JOB}])>last(/Cron jobs by zbxntfy/job.end[{#JOB}]) and now()-last(/Cron jobs by zbxntfy/job.start[{#JOB}])>{$JOB.MAXRUN:"{#JOB}"}'
+              name: 'Cron job {#JOB}: running longer than {$JOB.MAXRUN:"{#JOB}"}'
+              opdata: 'started: {ITEM.LASTVALUE1}'
+              priority: AVERAGE
+              description: 'The job started but did not report its end. It is still running, hung, or zbxntfy was killed.'
+              manual_close: 'YES'
+              tags:
+                - tag: job
+                  value: '{#JOB}'
+                - tag: notify
+                  value: '{#NOTIFY}'
+                - tag: scope
+                  value: performance
+            - uuid: '076c4ef2f3514262801fdbe01770ae21'
+              expression: 'last(/Cron jobs by zbxntfy/job.monitored[{#JOB}])=1 and nodata(/Cron jobs by zbxntfy/job.start[{#JOB}],{$JOB.SILENT:"{#JOB}"})=1'
+              name: 'Cron job {#JOB}: no run reported for {$JOB.SILENT:"{#JOB}"}'
+              priority: WARNING
+              description: |
+                zbxntfy has not reported any run for a long time (or never). This also covers newly
+                wrapped jobs that never ran. For jobs that run less often than {$JOB.SILENT},
+                set {$JOB.SILENT:"{#JOB}"} on the host.
+              manual_close: 'YES'
+              dependencies:
+                - name: 'Cron job {#JOB}: did not start on schedule'
+                  expression: 'last(/Cron jobs by zbxntfy/job.monitored[{#JOB}])=1 and last(/Cron jobs by zbxntfy/job.prev[{#JOB}])>last(/Cron jobs by zbxntfy/job.start[{#JOB}]) and now()-last(/Cron jobs by zbxntfy/job.prev[{#JOB}])>{$JOB.GRACE:"{#JOB}"}'
+              tags:
+                - tag: job
+                  value: '{#JOB}'
+                - tag: notify
+                  value: '{#NOTIFY}'
+                - tag: scope
+                  value: availability
+          master_item:
+            key: zbxntfy.jobs
+          lld_macro_paths:
+            - lld_macro: '{#CMD}'
+              path: $.cmd
+            - lld_macro: '{#JOB}'
+              path: $.job
+            - lld_macro: '{#NOTIFY}'
+              path: $.notify
+            - lld_macro: '{#SCHEDULE}'
+              path: $.schedule
+            - lld_macro: '{#SOURCE}'
+              path: $.source
+            - lld_macro: '{#USER}'
+              path: $.user
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.jobs
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          overrides:
+            - name: '@reboot jobs: no schedule'
+              step: '1'
+              filter:
+                conditions:
+                  - macro: '{#SCHEDULE}'
+                    value: '^@reboot'
+                    formulaid: A
+              operations:
+                - operationobject: TRIGGER_PROTOTYPE
+                  operator: REGEXP
+                  value: 'did not start on schedule|no run reported'
+                  discover: NO_DISCOVER
+      tags:
+        - tag: class
+          value: software
+        - tag: target
+          value: cron
+      macros:
+        - macro: '{$JOB.ERROR.REGEX}'
+          value: '\b(error|errors|fatal|critical|failed|failure|exception|traceback|panic|denied)\b'
+          description: 'JavaScript regex (case-insensitive) for error lines. Write "/" as "\/". Empty = disabled.'
+        - macro: '{$JOB.GRACE}'
+          value: 10m
+          description: 'How long after the scheduled time a job may start before "did not start on schedule".'
+        - macro: '{$JOB.IGNORE.REGEX}'
+          value: '\b(0|no) (errors?|warnings?|failures?|failed)\b|\b(errors?|warnings?|failures?|failed)\s*[:=]\s*0\b'
+          description: 'Lines matching this regex are never treated as errors or warnings (e.g. "0 errors"). Empty = disabled.'
+        - macro: '{$JOB.MAXRUN}'
+          value: 12h
+          description: 'Maximum run time before "running longer than".'
+        - macro: '{$JOB.NAME.MATCHES}'
+          value: '.*'
+          description: 'Discover only jobs whose name matches.'
+        - macro: '{$JOB.NAME.NOT_MATCHES}'
+          value: CHANGE_IF_NEEDED
+          description: 'Do not discover jobs whose name matches, e.g. ^(cron\.(hourly|daily|weekly|monthly)|e2scrub_all)$'
+        - macro: '{$JOB.SILENT}'
+          value: 8d
+          description: 'Alert when a monitored job has not reported any run for this long.'
+        - macro: '{$JOB.TAIL.LINES}'
+          value: '50'
+          description: 'Number of output lines included in alerts.'
+        - macro: '{$JOB.USER.MATCHES}'
+          value: '.*'
+          description: 'Discover only jobs of matching users.'
+        - macro: '{$JOB.USER.NOT_MATCHES}'
+          value: CHANGE_IF_NEEDED
+          description: 'Do not discover jobs of matching users.'
+        - macro: '{$JOB.WARN.REGEX}'
+          value: '\bwarn(ing|ings)?\b'
+          description: 'JavaScript regex (case-insensitive) for warning lines. Write "/" as "\/". Empty = disabled.'
+      valuemaps:
+        - uuid: '6c3fd807ac3b48d092bd9f1f691e5c05'
+          name: 'zbxntfy monitored'
+          mappings:
+            - value: '0'
+              newvalue: 'Not monitored'
+            - value: '1'
+              newvalue: Monitored

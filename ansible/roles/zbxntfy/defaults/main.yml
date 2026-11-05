@@ -1,0 +1,21 @@
+---
+# Where the binaries go on the host.
+zbxntfy_bin_dir: /usr/local/bin
+
+# Local directory with built binaries: <dir>/<arch>/zbxntfy{,-discovery} (see "make dist").
+zbxntfy_dist_dir: "{{ playbook_dir }}/../dist"
+
+# Install the zabbix-sender package (needs the Zabbix repository on the host).
+zbxntfy_install_sender: true
+
+# How zbxntfy-discovery reads user crontabs in /var/spool/cron:
+#   setcap - CAP_DAC_READ_SEARCH on the binary (recommended)
+#   sudo   - via /etc/sudoers.d/zbxntfy
+#   none   - only /etc/crontab and /etc/cron.d are discovered
+zbxntfy_privilege: setcap
+
+# Optional /etc/zbxntfy.conf (only when the defaults from the agent config are not enough).
+# zbxntfy_config:
+#   hostname: my-host
+#   server: zabbix-proxy.example.com
+zbxntfy_config: {}

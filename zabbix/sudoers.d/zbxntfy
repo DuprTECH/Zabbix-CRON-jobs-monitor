@@ -1,0 +1,4 @@
+# Only needed when zbxntfy-discovery runs via sudo (instead of setcap).
+# Install: visudo -cf zbxntfy && install -m 0440 zbxntfy /etc/sudoers.d/zbxntfy
+Defaults!/usr/local/bin/zbxntfy-discovery !syslog, !pam_session
+zabbix ALL=(root) NOPASSWD: /usr/local/bin/zbxntfy-discovery ""

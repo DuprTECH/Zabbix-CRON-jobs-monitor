@@ -1,0 +1,3 @@
+# {{ ansible_managed }}
+# zbxntfy: cron job discovery for template "Cron jobs by zbxntfy".
+UserParameter=zbxntfy.jobs,{{ 'sudo -n ' if zbxntfy_privilege == 'sudo' else '' }}{{ zbxntfy_bin_dir }}/zbxntfy-discovery

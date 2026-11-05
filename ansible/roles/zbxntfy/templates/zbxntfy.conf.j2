@@ -1,0 +1,4 @@
+# {{ ansible_managed }}
+{% for k, v in zbxntfy_config.items() %}
+{{ k }} = {{ v }}
+{% endfor %}

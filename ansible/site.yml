@@ -1,0 +1,8 @@
+---
+# Build first:  make dist
+# Run:          ansible-playbook -i <inventory> ansible/site.yml
+- name: Deploy zbxntfy (cron job monitoring for Zabbix)
+  hosts: all
+  become: true
+  roles:
+    - zbxntfy
