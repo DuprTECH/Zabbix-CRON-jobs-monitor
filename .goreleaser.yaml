@@ -23,9 +23,11 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    # stable name -> https://github.com/<repo>/releases/latest/download/zbxntfy_linux_amd64.tar.gz
+    name_template: "zbxntfy_linux_{{ .Arch }}"
     files:
       - README.md
-      - zabbix/*
+      - zabbix/**/*
 
 nfpms:
   - package_name: zbxntfy
@@ -34,6 +36,7 @@ nfpms:
     maintainer: DuprTECH
     description: Cron job monitoring for Zabbix (discovery via agent, results via zabbix_sender).
     formats: [deb, rpm]
+    file_name_template: "{{ .PackageName }}_linux_{{ .Arch }}"
     bindir: /usr/bin
     dependencies:
       - zabbix-sender

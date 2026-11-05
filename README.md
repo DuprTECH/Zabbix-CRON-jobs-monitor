@@ -12,9 +12,24 @@ Discovers **every** cron job on a host. For jobs you wrap with `zbxntfy`, Zabbix
 0 3 * * *  root  zbxntfy -n backup-db -t IT_ops /opt/scripts/backup.sh --db
 ```
 
-## Quick start (clone and test on one server)
+## Quick start (test on one server)
 
-Build the binaries on any machine with Go 1.22+ or Docker:
+### Get the binaries
+
+**Option A: download a release.** No build needed. Each `v*` tag is built by GitHub Actions.
+
+```sh
+ARCH=amd64     # or arm64
+curl -fsSLO https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor/releases/latest/download/zbxntfy_linux_$ARCH.tar.gz
+mkdir zbxntfy && tar -xzf zbxntfy_linux_$ARCH.tar.gz -C zbxntfy && cd zbxntfy
+mkdir -p dist/$ARCH && mv zbxntfy zbxntfy-discovery dist/$ARCH/     # same layout as a local build
+```
+
+Packages are also available: `zbxntfy_linux_amd64.deb` and `zbxntfy_linux_amd64.rpm`. They install to `/usr/bin`, set up setcap and the UserParameter. Install with `apt install ./zbxntfy_linux_amd64.deb`.
+
+If the repository is private, the download needs a token, e.g. `gh release download`.
+
+**Option B: build from source.** Needs Go 1.22+ or Docker:
 
 ```sh
 git clone https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor.git
@@ -26,7 +41,9 @@ docker run --rm -v "$PWD":/src -w /src golang:1.23 sh -c 'go test ./... && CGO_E
 
 The result is `dist/amd64/zbxntfy` and `dist/amd64/zbxntfy-discovery`, for `x86_64` servers. Use `arm64` for ARM.
 
-On the server, as root:
+### Install
+
+On the server, as root, in the extracted or cloned directory:
 
 ```sh
 install -m 0755 dist/amd64/zbxntfy dist/amd64/zbxntfy-discovery /usr/local/bin/
@@ -207,3 +224,11 @@ All macros can be overridden per host or per job with context, e.g. `{$JOB.WARN.
 make test     # go vet + unit tests (cron math, crontab parsing, name derivation)
 make dist
 ```
+
+## Releasing
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)) runs the tests and then goreleaser. The release gets `zbxntfy_linux_{amd64,arm64}.tar.gz`, `.deb`, `.rpm` and `checksums.txt`.
