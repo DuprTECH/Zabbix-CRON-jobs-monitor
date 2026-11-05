@@ -129,3 +129,35 @@ func TestApply(t *testing.T) {
 		t.Error("stale edit applied")
 	}
 }
+
+func TestIgnoreTag(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "var/spool/cron/crontabs/root", "0 1 * * * /opt/a.sh >/dev/null 2>&1\n"+
+		"0 2 * * * /opt/b.sh   # zbxntfy:ignore\n"+
+		"0 3 * * * date +\\%F%stdin\n")
+	jobs, _ := Scanner{Root: root}.Scan()
+	m := map[string]Job{}
+	for _, j := range jobs {
+		m[j.Name] = j
+	}
+	if m["a"].Ignored || !m["b"].Ignored || m["b"].Command != "/opt/b.sh" {
+		t.Fatalf("detection: a=%v b=%v %q", m["a"].Ignored, m["b"].Ignored, m["b"].Command)
+	}
+
+	got, err := PlanIgnore(m["a"], true)
+	if err != nil || got != "0 1 * * * /opt/a.sh >/dev/null 2>&1   # zbxntfy:ignore" {
+		t.Errorf("ignore: %q %v", got, err)
+	}
+	got, err = PlanIgnore(m["b"], false)
+	if err != nil || got != "0 2 * * * /opt/b.sh" {
+		t.Errorf("unignore: %q %v", got, err)
+	}
+	if _, err := PlanIgnore(m["date"], true); err == nil {
+		t.Error("ignore tag after % must be refused")
+	}
+	// wrapping an ignored job removes the tag
+	got, err = PlanWrap(m["b"], WrapOptions{Wrapper: "zbxntfy"})
+	if err != nil || got != "0 2 * * * zbxntfy /opt/b.sh" {
+		t.Errorf("wrap ignored: %q %v", got, err)
+	}
+}

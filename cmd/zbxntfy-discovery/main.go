@@ -38,6 +38,7 @@ type output struct {
 
 func main() {
 	pretty := flag.Bool("pretty", false, "indent JSON output")
+	includeSystem := flag.Bool("include-system", false, "also list distribution jobs (cron.daily, anacron/systemd-guarded lines) that are hidden by default")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -45,8 +46,17 @@ func main() {
 		return
 	}
 
-	jobs, errs := crontab.Scanner{}.Scan()
+	all, errs := crontab.Scanner{}.Scan()
 	now := time.Now()
+
+	var jobs []crontab.Job
+	for i := range all {
+		j := &all[i]
+		if j.Monitored == 0 && (j.Ignored || (!*includeSystem && j.IsDistroJob())) {
+			continue // "# zbxntfy:ignore" on the line, or a distribution job
+		}
+		jobs = append(jobs, *j)
+	}
 
 	out := output{Jobs: jobs, Schedule: map[string]times{}, Errors: strings.Join(errs, "\n")}
 	if out.Jobs == nil {

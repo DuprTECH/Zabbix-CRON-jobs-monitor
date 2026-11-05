@@ -112,3 +112,32 @@ bad line here
 		t.Errorf("@reboot times = %d %d", p, n)
 	}
 }
+
+func TestIsDistroJob(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "etc/crontab", `17 *	* * *	root    cd / && run-parts --report /etc/cron.hourly
+25 6	* * *	root	test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }
+0 1 * * * root /opt/backup.sh
+`)
+	write(t, root, "etc/cron.d/e2scrub_all", "10 3 * * * root test -e /run/systemd/system || SERVICE_MODE=1 /sbin/e2scrub_all -A -r\n")
+	write(t, root, "etc/cron.d/php", "09,39 * * * * root [ -x /usr/lib/php/sessionclean ] && if [ ! -d /run/systemd/system ]; then /usr/lib/php/sessionclean; fi\n")
+	write(t, root, "etc/cron.d/wrapped", "0 2 * * * root cd / && zbxntfy run-parts /etc/cron.weekly\n")
+	write(t, root, "var/spool/cron/crontabs/alice", "0 5 * * * test -e /run/systemd/system || /home/alice/x.sh\n")
+
+	jobs, _ := Scanner{Root: root}.Scan()
+	got := map[string]bool{}
+	for i := range jobs {
+		got[jobs[i].Name] = jobs[i].IsDistroJob()
+	}
+	want := map[string]bool{
+		"cron.hourly": true, "cron.daily": true, "e2scrub_all": true, "sessionclean": true,
+		"backup":      false,
+		"cron.weekly": false, // wrapped: shown
+		"x":           false, // user crontab: always shown
+	}
+	for n, w := range want {
+		if got[n] != w {
+			t.Errorf("%s: IsDistroJob = %v, want %v", n, got[n], w)
+		}
+	}
+}

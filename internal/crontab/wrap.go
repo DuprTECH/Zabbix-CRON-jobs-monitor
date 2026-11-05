@@ -42,6 +42,9 @@ func PlanWrap(j Job, o WrapOptions) (string, error) {
 		ins += " -t " + o.Notify
 	}
 	newLine := j.rawLine[:j.insertAt] + ins + " " + j.rawLine[j.insertAt:]
+	if j.Ignored { // monitoring wins over ignoring
+		newLine = removeIgnoreTag(newLine)
+	}
 
 	nj, err := parseLine(strings.TrimSpace(newLine), j.SystemCrontab(), j.User)
 	if err != nil {
@@ -49,6 +52,38 @@ func PlanWrap(j Job, o WrapOptions) (string, error) {
 	}
 	if nj.Monitored != 1 || nj.Name != j.Name {
 		return "", fmt.Errorf("rewritten line is not recognized as monitored job %q", j.Name)
+	}
+	return newLine, nil
+}
+
+func removeIgnoreTag(line string) string {
+	return strings.TrimRight(ignoreMarker.ReplaceAllString(line, ""), " \t")
+}
+
+// PlanIgnore adds (ignore=true) or removes the "# zbxntfy:ignore" tag.
+func PlanIgnore(j Job, ignore bool) (string, error) {
+	if j.Ignored == ignore {
+		return "", errors.New("nothing to change")
+	}
+	var newLine string
+	if ignore {
+		if j.Monitored == 1 {
+			return "", errors.New("job is monitored; remove zbxntfy first")
+		}
+		if rawCronCommand(j.rawLine) != j.rawLine {
+			// after an unescaped % everything is stdin for the command
+			return "", errors.New("the line uses % (stdin), the tag would become part of the input")
+		}
+		newLine = strings.TrimRight(j.rawLine, " \t") + "   " + IgnoreTag
+	} else {
+		newLine = removeIgnoreTag(j.rawLine)
+	}
+	nj, err := parseLine(strings.TrimSpace(newLine), j.SystemCrontab(), j.User)
+	if err != nil {
+		return "", fmt.Errorf("rewritten line does not parse: %v", err)
+	}
+	if nj.Ignored != ignore || nj.Name != j.baseName || nj.Monitored != j.Monitored {
+		return "", errors.New("rewritten line is not recognized as the same job")
 	}
 	return newLine, nil
 }

@@ -148,6 +148,7 @@ zabbix_export:
           type: DEPENDENT
           key: zbxntfy.jobs.discovery
           delay: '0'
+          enabled_lifetime_type: DISABLE_IMMEDIATELY
           filter:
             evaltype: AND
             conditions:

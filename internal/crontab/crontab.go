@@ -30,6 +30,9 @@ type Job struct {
 	Notify    string `json:"notify"`
 	Monitored int    `json:"monitored"` // 1 = wrapped with zbxntfy
 	TZ        string `json:"tz,omitempty"`
+	// Ignored: the line ends with "# zbxntfy:ignore"; discovery does not
+	// report the job (unless it is wrapped anyway).
+	Ignored bool `json:"-"`
 
 	sched *cronexpr.Schedule
 	loc   *time.Location
@@ -247,8 +250,16 @@ func parseLine(line string, system bool, user string) (*Job, error) {
 	if at >= 0 {
 		j.insertAt = restOff + at
 	}
+	j.Ignored = ignoreMarker.MatchString(rest)
+	j.Command = strings.TrimSpace(ignoreMarker.ReplaceAllString(j.Command, ""))
 	return j, nil
 }
+
+// IgnoreTag marks a cron line that should not be reported to Zabbix. It is a
+// shell comment, so it does not change what cron runs.
+const IgnoreTag = "# zbxntfy:ignore"
+
+var ignoreMarker = regexp.MustCompile(`(^|\s)#\s*zbxntfy:ignore\b.*$`)
 
 // rawCronCommand returns s up to the first unescaped '%', unchanged.
 func rawCronCommand(s string) string {
@@ -377,4 +388,24 @@ func dedupe(jobs []Job) (errs []string) {
 		}
 	}
 	return errs
+}
+
+// Distribution jobs in /etc/crontab and /etc/cron.d that are not worth
+// monitoring:
+//   - run-parts containers (cron.hourly, cron.daily, ...),
+//   - lines guarded by "test -x /usr/sbin/anacron ||" or
+//     "test -e /run/systemd/system ||": on systemd/anacron hosts they never run
+//     (anacron or a systemd timer does the work instead).
+var (
+	distroJobName  = regexp.MustCompile(`^(cron\.(hourly|daily|weekly|monthly)|0anacron)(-\d+)?$`)
+	distroJobGuard = regexp.MustCompile(`/usr/sbin/anacron|/run/systemd/system`)
+)
+
+// IsDistroJob reports whether the job is an unwrapped distribution job that
+// discovery and zbxntfy-wrap hide by default.
+func (j *Job) IsDistroJob() bool {
+	if j.Monitored == 1 || !j.SystemCrontab() {
+		return false
+	}
+	return distroJobName.MatchString(j.Name) || distroJobGuard.MatchString(j.Command)
 }

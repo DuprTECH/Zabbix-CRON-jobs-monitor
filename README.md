@@ -43,7 +43,7 @@ The package does the following:
 - sets `cap_dac_read_search` on `zbxntfy-discovery`, so the agent can read user crontabs
 - links the UserParameter into `/etc/zabbix/zabbix_agent2.d/` and/or `/etc/zabbix/zabbix_agentd.d/`
 - restarts the running agent
-- on the first interactive install, starts the [wizard](#3-wrap-jobs) that lets you pick the cron jobs to monitor. Skip it with `ZBXNTFY_NO_WIZARD=1 apt install ...`. It is also skipped automatically for non-interactive installs such as Ansible or `DEBIAN_FRONTEND=noninteractive`.
+- on the first interactive install, starts the [wizard](#3-choose-what-to-monitor) that lets you pick the cron jobs to monitor. Skip it with `ZBXNTFY_NO_WIZARD=1 apt install ...`. It is also skipped automatically for non-interactive installs such as Ansible or `DEBIAN_FRONTEND=noninteractive`.
 
 The last command must print all cron jobs as JSON, with an empty `"errors"`.
 
@@ -53,13 +53,11 @@ To upgrade, run the same commands again.
 
 1. Download [zabbix/template_cron_jobs_zbxntfy.yaml](https://raw.githubusercontent.com/DuprTECH/Zabbix-CRON-jobs-monitor/main/zabbix/template_cron_jobs_zbxntfy.yaml). It is also in `/usr/share/zbxntfy/` on the host.
 2. Go to *Data collection → Templates → Import* (Zabbix 7.0+).
-3. Link **Cron jobs by zbxntfy** to the host.
-4. Optional: exclude system jobs with the host macro `{$JOB.NAME.NOT_MATCHES}`, e.g.
-   `^(cron\.(hourly|daily|weekly|monthly)|e2scrub_all(_cron)?|sessionclean)$`
+3. Link **Cron jobs by zbxntfy** to the host. The host name must equal `Hostname=` in the agent config.
 
-After 1–2 minutes, the cron jobs appear in *Latest data*, filtered by tag `component: cron`. Jobs not wrapped yet show up as **not monitored** problems.
+After 1–2 minutes, the cron jobs appear in *Latest data*, filtered by tag `component: cron`. Jobs not wrapped yet show up as **not monitored** problems. [System jobs](#system-jobs) are left out.
 
-### 3. Wrap jobs
+### 3. Choose what to monitor
 
 Run the wizard as root:
 
@@ -67,7 +65,15 @@ Run the wizard as root:
 zbxntfy-wrap
 ```
 
-![zbxntfy-wrap wizard: pick cron jobs with arrow keys and space](docs/images/zbxntfy-wrap-wizard.svg)
+![zbxntfy-wrap wizard: monitor or ignore cron jobs](docs/images/zbxntfy-wrap-wizard.svg)
+
+For every job, choose one of three states:
+
+| Mark | Key | Effect on the cron line | In Zabbix |
+|---|---|---|---|
+| `[x]` monitor | space | `zbxntfy` is put in front of the command | results, errors, schedule checks |
+| `[-]` ignore | `i` | `# zbxntfy:ignore` is added at the end of the line | hidden |
+| `[ ]` leave as is | | unchanged | **not monitored** problem |
 
 The wizard then:
 
@@ -78,37 +84,61 @@ The wizard then:
 
 ```
 /var/spool/cron/crontabs/root:12  backup-db
-  - 40 2 * * * /opt/./backup-db -q
-  + 40 2 * * * /usr/bin/zbxntfy /opt/./backup-db -q
+  - 40 2 * * * /opt/backup/backup-db.sh -q
+  + 40 2 * * * /usr/bin/zbxntfy /opt/backup/backup-db.sh -q
+/etc/cron.d/tmp-cleanup:1  tmp-cleanup
+  - */30 * * * * root find /tmp/app -mtime +1 -delete
+  + */30 * * * * root find /tmp/app -mtime +1 -delete   # zbxntfy:ignore
 
-changed /var/spool/cron/crontabs/root (2 job(s))
+changed /var/spool/cron/crontabs/root (1 line(s))
         backup:  /var/backups/zbxntfy/20261105-174500/var/spool/cron/crontabs/root
         restore: crontab -u root /var/backups/zbxntfy/20261105-174500/var/spool/cron/crontabs/root
 ```
 
-**not monitored** resolves within a minute. Every run then reports its start, exit code, duration and output.
+Zabbix shows the result within a minute.
 
-What `zbxntfy-wrap` does:
+#### Ignoring a job
 
-- Inserts `zbxntfy` exactly in front of the job's command:
+Everything is stored in the crontab itself, so no extra configuration file is needed. A line that ends with `# zbxntfy:ignore` is not reported to Zabbix:
+
+```
+*/30 * * * *  find /tmp/app -mtime +1 -delete   # zbxntfy:ignore
+```
+
+The tag is a shell comment, so it does not change what cron runs. You can add or remove it by hand, or with `zbxntfy-wrap -ignore` / `-unignore`. If you wrap an ignored job with `zbxntfy`, the tag is removed.
+
+#### System jobs
+
+Some distribution jobs are hidden by default, in Zabbix and in `zbxntfy-wrap -list` / `-all`:
+
+- `cron.hourly`, `cron.daily`, `cron.weekly` and `cron.monthly` from `/etc/crontab` only start the scripts in those directories. Except for hourly, anacron runs them on most systems.
+- Lines guarded by `test -x /usr/sbin/anacron ||` or `test -e /run/systemd/system ||`, such as `e2scrub_all` and php `sessionclean`, never run on systemd hosts, because a systemd timer does the work.
+
+The wizard lists them at the end as `(system)`, pre-set to `[-]`. Set one to `[x]` if you want it monitored. To show them in Zabbix as well, add `-include-system` to the UserParameter command.
+
+#### What `zbxntfy-wrap` guarantees
+
+- **Placement:** `zbxntfy` goes exactly in front of the job's command:
   - after `cd /x &&`
   - after `VAR=value`
   - inside `if …; then` and `{ …; }`
-  
-  Redirects and everything else stay unchanged.
-- Re-parses every changed line and checks that discovery will see it as the same job, now monitored.
-- Backs up every affected file to `/var/backups/zbxntfy/<timestamp>/` before writing. Each change prints its own restore command.
-- `/etc/crontab` and `/etc/cron.d/*`: replaced atomically, keeping owner and mode.
-- User crontabs: installed with `crontab -u <user> -`, so cron reloads them.
-- Refuses to write a file that changed since it was read.
 
-Non-interactive use, for scripts and Ansible:
+  Redirects and everything else stay unchanged.
+- **Verification:** every changed line is parsed again and must be recognized as the same job.
+- **Backup:** every affected file is copied to `/var/backups/zbxntfy/<timestamp>/` before writing. Each change prints its own restore command.
+- **System crontabs** (`/etc/crontab`, `/etc/cron.d/*`) are replaced atomically, keeping owner and mode.
+- **User crontabs** are installed with `crontab -u <user> -`, so cron reloads them.
+- **Safety:** a file that changed since it was read is not written.
+
+#### Non-interactive use (scripts, Ansible)
 
 ```sh
-zbxntfy-wrap -list                                # jobs not monitored yet
-zbxntfy-wrap backup-db rotate-logs              # show the change only
-zbxntfy-wrap -apply backup-db rotate-logs       # back up, then change
-zbxntfy-wrap -all -exclude '^(cron\.|e2scrub|sessionclean)' -t IT_ops -apply
+zbxntfy-wrap -list                                # not monitored / ignored jobs
+zbxntfy-wrap backup-db rotate-logs                # show the change only
+zbxntfy-wrap -apply backup-db rotate-logs         # back up, then wrap
+zbxntfy-wrap -ignore -apply tmp-cleanup           # add "# zbxntfy:ignore"
+zbxntfy-wrap -unignore -apply tmp-cleanup         # remove it
+zbxntfy-wrap -all -exclude '^tmp' -t IT_ops -apply
 ```
 
 You can also edit the crontab by hand: put `zbxntfy` in front of the command, e.g. `40 2 * * *  zbxntfy /opt/backup/backup-db.sh -q`.

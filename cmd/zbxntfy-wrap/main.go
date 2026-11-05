@@ -1,8 +1,9 @@
-// zbxntfy-wrap puts "zbxntfy" in front of existing cron jobs.
+// zbxntfy-wrap puts "zbxntfy" in front of existing cron jobs, or marks jobs
+// with "# zbxntfy:ignore" so Zabbix does not report them as "not monitored".
 //
-// Run without arguments in a terminal, it starts a wizard: pick the jobs with
-// the arrow keys and space, review the changes, confirm. With job names (or
-// -all) it shows the changes, and writes them with -apply.
+// Run without arguments in a terminal, it starts a wizard: for each job choose
+// monitor [x], ignore [-] or leave it [ ], review the changes, confirm.
+// With job names (or -all) it shows the changes, and writes them with -apply.
 //
 // Before writing, every affected crontab is backed up to
 // /var/backups/zbxntfy/<timestamp>/. /etc/crontab and /etc/cron.d/* are
@@ -31,13 +32,15 @@ var version = "dev"
 
 const usage = `Usage: zbxntfy-wrap [options] [job ...]
 
-Puts zbxntfy in front of cron jobs that are not monitored yet.
+Puts zbxntfy in front of cron jobs, or marks them "# zbxntfy:ignore".
 
-  zbxntfy-wrap                          wizard: pick jobs, review, confirm
+  zbxntfy-wrap                          wizard: monitor / ignore, review, confirm
   zbxntfy-wrap -list                    list jobs that are not monitored
-  zbxntfy-wrap backup-db rotate-logs  show the change for these jobs
-  zbxntfy-wrap -apply backup-db       back up the crontab, then change it
-  zbxntfy-wrap -all -exclude '^cron\.' -apply
+  zbxntfy-wrap backup-db rotate-logs    show the change for these jobs
+  zbxntfy-wrap -apply backup-db         back up the crontab, then change it
+  zbxntfy-wrap -ignore -apply cleanup   add "# zbxntfy:ignore" to the line
+  zbxntfy-wrap -unignore -apply cleanup remove it again
+  zbxntfy-wrap -all -exclude '^tmp' -t IT_ops -apply
 
 Options:
 `
@@ -48,12 +51,18 @@ type config struct {
 	wrapper    string
 }
 
+// showSystem: also offer distribution jobs (-system) in -list and -all.
+var showSystem bool
+
 func main() {
 	fs := flag.NewFlagSet("zbxntfy-wrap", flag.ExitOnError)
-	all := fs.Bool("all", false, "all jobs that are not monitored yet")
+	all := fs.Bool("all", false, "all jobs that are not monitored or ignored")
 	exclude := fs.String("exclude", "", "with -all: skip jobs whose name matches this `regex`")
-	list := fs.Bool("list", false, "only list jobs that are not monitored (no wizard)")
+	list := fs.Bool("list", false, "only list jobs (no wizard)")
 	apply := fs.Bool("apply", false, "write the changes (crontabs are backed up first)")
+	ignore := fs.Bool("ignore", false, "add \"# zbxntfy:ignore\" to the named jobs instead of wrapping them")
+	unignore := fs.Bool("unignore", false, "remove \"# zbxntfy:ignore\" from the named jobs")
+	fs.BoolVar(&showSystem, "system", false, "with -list/-all: include distribution jobs (cron.daily, anacron/systemd-guarded lines)")
 	var c config
 	fs.StringVar(&c.notify, "t", "", "add \"-t `value`\" (trigger tag notify:<value>)")
 	fs.StringVar(&c.backupRoot, "backup-dir", "/var/backups/zbxntfy", "`directory` for backups")
@@ -75,7 +84,14 @@ func main() {
 	}
 
 	names := fs.Args()
-	if len(names) == 0 && !*all {
+	switch {
+	case *ignore || *unignore:
+		if *ignore && *unignore || len(names) == 0 {
+			fmt.Fprintln(os.Stderr, "zbxntfy-wrap: use -ignore or -unignore with job names")
+			os.Exit(2)
+		}
+		os.Exit(batchIgnore(jobs, names, *ignore, *apply, c))
+	case len(names) == 0 && !*all:
 		interactive := term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 		if *list || !interactive {
 			os.Exit(listJobs(jobs))
@@ -95,10 +111,12 @@ func defaultWrapper() string {
 	return "zbxntfy"
 }
 
-func unmonitored(jobs []crontab.Job) []crontab.Job {
+// candidates returns the jobs offered for wrapping: not monitored, not
+// ignored, and no distribution job (unless -system).
+func candidates(jobs []crontab.Job) []crontab.Job {
 	var out []crontab.Job
 	for _, j := range jobs {
-		if j.Monitored == 0 {
+		if j.Monitored == 0 && !j.Ignored && (showSystem || !j.IsDistroJob()) {
 			out = append(out, j)
 		}
 	}
@@ -106,18 +124,57 @@ func unmonitored(jobs []crontab.Job) []crontab.Job {
 }
 
 func listJobs(jobs []crontab.Job) int {
-	cands := unmonitored(jobs)
-	if len(cands) == 0 {
-		fmt.Println("All cron jobs are monitored by zbxntfy.")
-		return 0
+	show := func(title string, pick func(j *crontab.Job) bool) {
+		n := 0
+		for i := range jobs {
+			j := &jobs[i]
+			if !pick(j) {
+				continue
+			}
+			if n == 0 {
+				fmt.Println(title)
+			}
+			n++
+			fmt.Printf("  %-30s %s:%d\n  %-30s %s %s\n", j.Name, j.FilePath(), j.LineNo(), "", j.Schedule, j.Command)
+		}
+		if n > 0 {
+			fmt.Println()
+		}
 	}
-	fmt.Println("Jobs not monitored by zbxntfy:")
-	for _, j := range cands {
-		fmt.Printf("  %-30s %s:%d\n  %-30s %s %s\n", j.Name, j.FilePath(), j.LineNo(), "", j.Schedule, j.Command)
+	show("Not monitored (shown in Zabbix as \"not monitored\"):", func(j *crontab.Job) bool {
+		return j.Monitored == 0 && !j.Ignored && !j.IsDistroJob()
+	})
+	show("Ignored (\"# zbxntfy:ignore\", hidden in Zabbix):", func(j *crontab.Job) bool {
+		return j.Monitored == 0 && j.Ignored
+	})
+	if showSystem {
+		show("Distribution jobs (hidden in Zabbix):", func(j *crontab.Job) bool {
+			return j.Monitored == 0 && !j.Ignored && j.IsDistroJob()
+		})
 	}
-	fmt.Println("\nShow the change:   zbxntfy-wrap <job> [job ...]   (or -all)")
-	fmt.Println("Make the change:   zbxntfy-wrap -apply <job> [job ...]")
+	fmt.Println("Wizard:            zbxntfy-wrap")
+	fmt.Println("Monitor jobs:      zbxntfy-wrap -apply <job> [job ...]")
+	fmt.Println("Ignore jobs:       zbxntfy-wrap -ignore -apply <job> [job ...]")
 	return 0
+}
+
+func findJobs(jobs []crontab.Job, names []string) ([]crontab.Job, int) {
+	byName := map[string]crontab.Job{}
+	for _, j := range jobs {
+		byName[j.Name] = j
+	}
+	var out []crontab.Job
+	rc := 0
+	for _, n := range names {
+		j, ok := byName[n]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "zbxntfy-wrap: no cron job named %q (run with -list to see them)\n", n)
+			rc = 1
+			continue
+		}
+		out = append(out, j)
+	}
+	return out, rc
 }
 
 func batch(jobs []crontab.Job, names []string, all bool, exclude string, apply bool, c config) int {
@@ -129,36 +186,49 @@ func batch(jobs []crontab.Job, names []string, all bool, exclude string, apply b
 			return 2
 		}
 	}
-	byName := map[string]crontab.Job{}
-	for _, j := range jobs {
-		byName[j.Name] = j
-	}
 	var selected []crontab.Job
-	rc := 0
 	if all {
-		for _, j := range unmonitored(jobs) {
+		for _, j := range candidates(jobs) {
 			if excl == nil || !excl.MatchString(j.Name) {
 				selected = append(selected, j)
 			}
 		}
 	}
-	for _, n := range names {
-		j, ok := byName[n]
-		switch {
-		case !ok:
-			fmt.Fprintf(os.Stderr, "zbxntfy-wrap: no cron job named %q (run with -list to see them)\n", n)
-			rc = 1
-		case j.Monitored == 1:
-			fmt.Printf("%s: already monitored\n", n)
-		default:
-			selected = append(selected, j)
+	named, rc := findJobs(jobs, names)
+	for _, j := range named {
+		if j.Monitored == 1 {
+			fmt.Printf("%s: already monitored\n", j.Name)
+			continue
 		}
+		selected = append(selected, j)
 	}
 
-	edits, prc := plan(selected, c)
-	if prc != 0 {
-		rc = prc
+	var edits []crontab.Edit
+	opts := crontab.WrapOptions{Wrapper: c.wrapper, Notify: c.notify}
+	for _, j := range selected {
+		if e, ok := planOne(j, func() (string, error) { return crontab.PlanWrap(j, opts) }); ok {
+			edits = append(edits, e)
+		} else {
+			rc = 1
+		}
 	}
+	return finish(edits, apply, rc, c)
+}
+
+func batchIgnore(jobs []crontab.Job, names []string, ignore, apply bool, c config) int {
+	named, rc := findJobs(jobs, names)
+	var edits []crontab.Edit
+	for _, j := range named {
+		if e, ok := planOne(j, func() (string, error) { return crontab.PlanIgnore(j, ignore) }); ok {
+			edits = append(edits, e)
+		} else {
+			rc = 1
+		}
+	}
+	return finish(edits, apply, rc, c)
+}
+
+func finish(edits []crontab.Edit, apply bool, rc int, c config) int {
 	if len(edits) == 0 {
 		return rc
 	}
@@ -172,23 +242,16 @@ func batch(jobs []crontab.Job, names []string, all bool, exclude string, apply b
 	return rc
 }
 
-// plan computes and prints the line changes.
-func plan(selected []crontab.Job, c config) ([]crontab.Edit, int) {
-	opts := crontab.WrapOptions{Wrapper: c.wrapper, Notify: c.notify}
-	var edits []crontab.Edit
-	rc := 0
-	for _, j := range selected {
-		nl, err := crontab.PlanWrap(j, opts)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: skipped: %v\n", j.Name, err)
-			rc = 1
-			continue
-		}
-		fmt.Printf("%s:%d  %s\n  - %s\n  + %s\n", j.FilePath(), j.LineNo(), j.Name,
-			crontab.MaskSecrets(strings.TrimSpace(j.RawLine())), crontab.MaskSecrets(strings.TrimSpace(nl)))
-		edits = append(edits, crontab.Edit{Job: j, NewLine: nl})
+// planOne computes one change and prints it as a diff.
+func planOne(j crontab.Job, plan func() (string, error)) (crontab.Edit, bool) {
+	nl, err := plan()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: skipped: %v\n", j.Name, err)
+		return crontab.Edit{}, false
 	}
-	return edits, rc
+	fmt.Printf("%s:%d  %s\n  - %s\n  + %s\n", j.FilePath(), j.LineNo(), j.Name,
+		crontab.MaskSecrets(strings.TrimSpace(j.RawLine())), crontab.MaskSecrets(strings.TrimSpace(nl)))
+	return crontab.Edit{Job: j, NewLine: nl}, true
 }
 
 func applyEdits(edits []crontab.Edit, c config) int {
@@ -211,7 +274,7 @@ func applyEdits(edits []crontab.Edit, c config) int {
 			rc = 1
 			continue
 		}
-		fmt.Printf("changed %s (%d job(s))\n", r.File, r.Edits)
+		fmt.Printf("changed %s (%d line(s))\n", r.File, r.Edits)
 		fmt.Printf("        backup:  %s\n", r.Backup)
 		fmt.Printf("        restore: %s\n", r.Restore)
 	}
@@ -229,42 +292,97 @@ func installUserCrontab(user, content string) error {
 	return nil
 }
 
-// wizard: pick jobs, choose a notification tag, review, confirm, apply.
+// wizard states
+const (
+	stNone    = 0 // leave as it is: Zabbix shows "not monitored"
+	stMonitor = 1 // wrap with zbxntfy
+	stIgnore  = 2 // "# zbxntfy:ignore" (distribution jobs are hidden anyway)
+)
+
+type item struct {
+	job    crontab.Job
+	distro bool
+	state  int
+}
+
+// wizard: choose monitor / ignore per job, choose a notification tag,
+// review, confirm, apply.
 func wizard(jobs []crontab.Job, c config) int {
-	cands := unmonitored(jobs)
-	if len(cands) == 0 {
+	var items []item
+	monitored := 0
+	// regular jobs first, then ignored, then distribution jobs
+	for pass := 0; pass < 3; pass++ {
+		for _, j := range jobs {
+			if j.Monitored == 1 {
+				if pass == 0 {
+					monitored++
+				}
+				continue
+			}
+			d := j.IsDistroJob()
+			p := 0
+			switch {
+			case d:
+				p = 2
+			case j.Ignored:
+				p = 1
+			}
+			if p != pass {
+				continue
+			}
+			st := stNone
+			if j.Ignored || d {
+				st = stIgnore
+			}
+			items = append(items, item{job: j, distro: d, state: st})
+		}
+	}
+	if len(items) == 0 {
 		fmt.Println("All cron jobs are monitored by zbxntfy.")
 		return 0
 	}
-	monitored := len(jobs) - len(cands)
 
-	picked, ok := pick(cands, monitored)
-	if !ok {
+	if !pick(items, monitored) {
 		fmt.Println("Cancelled, nothing changed.")
-		return 0
-	}
-	var selected []crontab.Job
-	for i, p := range picked {
-		if p {
-			selected = append(selected, cands[i])
-		}
-	}
-	if len(selected) == 0 {
-		fmt.Println("No job selected, nothing changed.")
 		return 0
 	}
 
 	in := bufio.NewReader(os.Stdin)
-	if c.notify == "" {
+	wraps := 0
+	for _, it := range items {
+		if it.state == stMonitor {
+			wraps++
+		}
+	}
+	if wraps > 0 && c.notify == "" {
 		fmt.Print("Notification tag for alerts (zbxntfy -t <value>), Enter = default: ")
 		line, _ := in.ReadString('\n')
 		c.notify = strings.TrimSpace(line)
 	}
 
 	fmt.Println()
-	edits, _ := plan(selected, c)
+	opts := crontab.WrapOptions{Wrapper: c.wrapper, Notify: c.notify}
+	var edits []crontab.Edit
+	for _, it := range items {
+		j := it.job
+		var plan func() (string, error)
+		switch {
+		case it.state == stMonitor:
+			plan = func() (string, error) { return crontab.PlanWrap(j, opts) }
+		case it.state == stIgnore && !j.Ignored && !it.distro:
+			plan = func() (string, error) { return crontab.PlanIgnore(j, true) }
+		case it.state != stIgnore && j.Ignored:
+			plan = func() (string, error) { return crontab.PlanIgnore(j, false) }
+		default:
+			continue // no change
+		}
+		if e, ok := planOne(j, plan); ok {
+			edits = append(edits, e)
+		}
+	}
 	if len(edits) == 0 {
-		return 1
+		fmt.Println("No changes.")
+		return 0
 	}
 	fmt.Printf("\nApply %d change(s)? The crontabs are backed up first. [y/N]: ", len(edits))
 	line, _ := in.ReadString('\n')
@@ -275,14 +393,13 @@ func wizard(jobs []crontab.Job, c config) int {
 	return applyEdits(edits, c)
 }
 
-// pick shows a checkbox list. It returns the selection and false when the
-// user cancelled.
-func pick(jobs []crontab.Job, monitored int) ([]bool, bool) {
+// pick shows the job list. It returns false when the user cancelled.
+func pick(items []item, monitored int) bool {
 	fd := int(os.Stdin.Fd())
 	old, err := term.MakeRaw(fd)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "zbxntfy-wrap: cannot use the terminal:", err)
-		return nil, false
+		return false
 	}
 	out := os.Stdout
 	fmt.Fprint(out, "\x1b[?1049h\x1b[?25l") // alternate screen, hide cursor
@@ -291,7 +408,6 @@ func pick(jobs []crontab.Job, monitored int) ([]bool, bool) {
 		_ = term.Restore(fd, old)
 	}()
 
-	sel := make([]bool, len(jobs))
 	cur, top := 0, 0
 	buf := make([]byte, 16)
 	for {
@@ -299,7 +415,7 @@ func pick(jobs []crontab.Job, monitored int) ([]bool, bool) {
 		if err != nil || w < 40 || h < 10 {
 			w, h = 100, 30
 		}
-		rows := h - 6
+		rows := h - 7
 		if cur < top {
 			top = cur
 		}
@@ -309,38 +425,54 @@ func pick(jobs []crontab.Job, monitored int) ([]bool, bool) {
 
 		var b strings.Builder
 		b.WriteString("\x1b[H\x1b[2J")
-		b.WriteString("\x1b[1mSelect cron jobs to monitor with zbxntfy\x1b[0m")
+		b.WriteString("\x1b[1mCron jobs: choose what to monitor with zbxntfy\x1b[0m")
 		if monitored > 0 {
 			fmt.Fprintf(&b, "  (%d already monitored)", monitored)
 		}
-		b.WriteString("\r\n\x1b[2m↑/↓ move   space select   a all   n none   enter continue   q quit\x1b[0m\r\n\r\n")
-		for i := top; i < len(jobs) && i < top+rows; i++ {
-			j := jobs[i]
+		b.WriteString("\r\n\x1b[2m[x] monitor   [-] ignore (hidden in Zabbix)   [ ] leave as is (\"not monitored\" in Zabbix)\x1b[0m\r\n")
+		b.WriteString("\x1b[2m↑/↓ move   space monitor   i ignore   a all   n none   enter continue   q quit\x1b[0m\r\n\r\n")
+		for i := top; i < len(items) && i < top+rows; i++ {
+			it := items[i]
+			j := it.job
 			box := "[ ]"
-			if sel[i] {
+			switch it.state {
+			case stMonitor:
 				box = "[\x1b[32mx\x1b[0m]"
+			case stIgnore:
+				box = "[\x1b[33m-\x1b[0m]"
 			}
-			text := fmt.Sprintf("%-28s %-15s %s", trunc(j.Name, 28), trunc(j.Schedule, 15), j.Command)
+			name := j.Name
+			if it.distro {
+				name += " (system)"
+			}
+			text := fmt.Sprintf("%-28s %-15s %s", trunc(name, 28), trunc(j.Schedule, 15), j.Command)
 			line := fmt.Sprintf(" %s %s", box, trunc(text, w-7))
-			if i == cur {
+			switch {
+			case i == cur:
 				line = "\x1b[7m>" + line + "\x1b[0m"
-			} else {
+			case it.distro:
+				line = " \x1b[2m" + line + "\x1b[0m"
+			default:
 				line = " " + line
 			}
 			b.WriteString(line + "\r\n")
 		}
-		n := 0
-		for _, s := range sel {
-			if s {
-				n++
+		nm, ni := 0, 0
+		for _, it := range items {
+			switch it.state {
+			case stMonitor:
+				nm++
+			case stIgnore:
+				ni++
 			}
 		}
-		fmt.Fprintf(&b, "\r\n%d of %d selected   %s (%s)", n, len(jobs), trunc(jobs[cur].FilePath(), w-30), jobs[cur].User)
+		fmt.Fprintf(&b, "\r\nmonitor %d, ignore %d, of %d   %s (%s)", nm, ni, len(items),
+			trunc(items[cur].job.FilePath(), w-40), items[cur].job.User)
 		fmt.Fprint(out, b.String())
 
 		k, err := os.Stdin.Read(buf)
 		if err != nil {
-			return nil, false
+			return false
 		}
 		switch key := string(buf[:k]); key {
 		case "\x1b[A", "k":
@@ -348,30 +480,47 @@ func pick(jobs []crontab.Job, monitored int) ([]bool, bool) {
 				cur--
 			}
 		case "\x1b[B", "j":
-			if cur < len(jobs)-1 {
+			if cur < len(items)-1 {
 				cur++
 			}
 		case "\x1b[5~": // page up
 			cur = max(0, cur-rows)
 		case "\x1b[6~": // page down
-			cur = min(len(jobs)-1, cur+rows)
+			cur = min(len(items)-1, cur+rows)
 		case " ", "x":
-			sel[cur] = !sel[cur]
-			if cur < len(jobs)-1 {
+			if items[cur].state == stMonitor {
+				items[cur].state = stNone
+			} else {
+				items[cur].state = stMonitor
+			}
+			if cur < len(items)-1 {
+				cur++
+			}
+		case "i", "-":
+			if items[cur].state == stIgnore {
+				items[cur].state = stNone
+			} else {
+				items[cur].state = stIgnore
+			}
+			if cur < len(items)-1 {
 				cur++
 			}
 		case "a":
-			for i := range sel {
-				sel[i] = true
+			for i := range items {
+				if items[i].state == stNone {
+					items[i].state = stMonitor
+				}
 			}
 		case "n":
-			for i := range sel {
-				sel[i] = false
+			for i := range items {
+				if items[i].state == stMonitor {
+					items[i].state = stNone
+				}
 			}
 		case "\r", "\n":
-			return sel, true
+			return true
 		case "q", "\x03", "\x1b":
-			return nil, false
+			return false
 		}
 	}
 }
