@@ -239,7 +239,7 @@ zabbix_export:
                   value: '{#JOB}'
             - uuid: '104f9f4e922e4618bfd380121ab531bc'
               name: 'Cron job {#JOB}: Last start'
-              type: TRAPPER
+              type: TRAP
               key: 'job.start[{#JOB}]'
               history: 31d
               trends: '0'
@@ -252,7 +252,7 @@ zabbix_export:
                   value: '{#JOB}'
             - uuid: 'f3271303b6924794a6760d8f296263e7'
               name: 'Cron job {#JOB}: Last end'
-              type: TRAPPER
+              type: TRAP
               key: 'job.end[{#JOB}]'
               history: 31d
               trends: '0'
@@ -265,7 +265,7 @@ zabbix_export:
                   value: '{#JOB}'
             - uuid: '49f275afd3374da585c52ce44157406e'
               name: 'Cron job {#JOB}: Duration'
-              type: TRAPPER
+              type: TRAP
               key: 'job.duration[{#JOB}]'
               history: 31d
               value_type: FLOAT
@@ -277,7 +277,7 @@ zabbix_export:
                   value: '{#JOB}'
             - uuid: '30a0c394b25b474c8002414dcee9b45e'
               name: 'Cron job {#JOB}: Exit code'
-              type: TRAPPER
+              type: TRAP
               key: 'job.rc[{#JOB}]'
               history: 31d
               trends: '0'
@@ -289,7 +289,7 @@ zabbix_export:
                   value: '{#JOB}'
             - uuid: '4f9c7cc14f8f46a3bdee78448cecd3e7'
               name: 'Cron job {#JOB}: Output'
-              type: TRAPPER
+              type: TRAP
               key: 'job.log[{#JOB}]'
               history: 7d
               value_type: TEXT
