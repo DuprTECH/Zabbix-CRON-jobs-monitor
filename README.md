@@ -12,62 +12,70 @@ Discovers **every** cron job on a host. For jobs you wrap with `zbxntfy`, Zabbix
 0 3 * * *  root  zbxntfy -n backup-db -t IT_ops /opt/scripts/backup.sh --db
 ```
 
-## Quick start (test on one server)
+## Quick start
 
-### Get the binaries
+You do not need to build anything. Every release contains ready-made packages.
 
-**Option A: download a release.** No build needed. Each `v*` tag is built by GitHub Actions.
+### 1. Install on the server (as root)
+
+Debian / Ubuntu:
 
 ```sh
-ARCH=amd64     # or arm64
-curl -fsSLO https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor/releases/latest/download/zbxntfy_linux_$ARCH.tar.gz
-mkdir zbxntfy && tar -xzf zbxntfy_linux_$ARCH.tar.gz -C zbxntfy && cd zbxntfy
-mkdir -p dist/$ARCH && mv zbxntfy zbxntfy-discovery dist/$ARCH/     # same layout as a local build
+cd /tmp && curl -fsSLO https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor/releases/latest/download/zbxntfy_linux_amd64.deb
+apt install ./zbxntfy_linux_amd64.deb
+sudo -u zabbix zbxntfy-discovery -pretty
 ```
 
-Packages are also available: `zbxntfy_linux_amd64.deb` and `zbxntfy_linux_amd64.rpm`. They install to `/usr/bin`, set up setcap and the UserParameter. Install with `apt install ./zbxntfy_linux_amd64.deb`.
-
-If the repository is private, the download needs a token, e.g. `gh release download`.
-
-**Option B: build from source.** Needs Go 1.22+ or Docker:
+RHEL / Rocky / Alma:
 
 ```sh
-git clone https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor.git
-cd Zabbix-CRON-jobs-monitor
-make test dist          # without make: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/amd64/ ./cmd/...
-# or, with Docker only:
-docker run --rm -v "$PWD":/src -w /src golang:1.23 sh -c 'go test ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/amd64/ ./cmd/...'
+cd /tmp && curl -fsSLO https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor/releases/latest/download/zbxntfy_linux_amd64.rpm
+dnf install ./zbxntfy_linux_amd64.rpm
+sudo -u zabbix zbxntfy-discovery -pretty
 ```
 
-The result is `dist/amd64/zbxntfy` and `dist/amd64/zbxntfy-discovery`, for `x86_64` servers. Use `arm64` for ARM.
+For ARM servers, replace `amd64` with `arm64`.
 
-### Install
+The package does the following:
 
-On the server, as root, in the extracted or cloned directory:
+- installs `zbxntfy` and `zbxntfy-discovery` to `/usr/bin`
+- pulls in `zabbix-sender`, from the Zabbix repository, which must be configured on the host
+- sets `cap_dac_read_search` on `zbxntfy-discovery`, so the agent can read user crontabs
+- links the UserParameter into `/etc/zabbix/zabbix_agent2.d/` and/or `/etc/zabbix/zabbix_agentd.d/`
+- restarts the running agent
 
-```sh
-install -m 0755 dist/amd64/zbxntfy dist/amd64/zbxntfy-discovery /usr/local/bin/
-apt install zabbix-sender libcap2-bin           # RHEL: dnf install zabbix-sender libcap
-setcap cap_dac_read_search+ep /usr/local/bin/zbxntfy-discovery
-sudo -u zabbix /usr/local/bin/zbxntfy-discovery -pretty     # should list all cron jobs, empty "errors"
+The last command must print all cron jobs as JSON, with an empty `"errors"`.
 
-cp zabbix/userparameter_zbxntfy.conf /etc/zabbix/zabbix_agent2.d/   # agent 1: /etc/zabbix/zabbix_agentd.d/
-systemctl restart zabbix-agent2
+To upgrade, run the same commands again.
+
+### 2. Import the template in Zabbix
+
+1. Download [zabbix/template_cron_jobs_zbxntfy.yaml](https://raw.githubusercontent.com/DuprTECH/Zabbix-CRON-jobs-monitor/main/zabbix/template_cron_jobs_zbxntfy.yaml). It is also in `/usr/share/zbxntfy/` on the host.
+2. Go to *Data collection → Templates → Import* (Zabbix 7.0+).
+3. Link **Cron jobs by zbxntfy** to the host.
+4. Optional: exclude system jobs with the host macro `{$JOB.NAME.NOT_MATCHES}`, e.g.
+   `^(cron\.(hourly|daily|weekly|monthly)|e2scrub_all(_cron)?|sessionclean)$`
+
+After 1–2 minutes, the cron jobs appear in *Latest data*, filtered by tag `component: cron`. Jobs not wrapped yet show up as **not monitored** problems.
+
+### 3. Wrap a job
+
+Put `zbxntfy` in front of the command in the crontab:
+
+```
+40 2 * * *  zbxntfy /opt/zabbix-dump -q
 ```
 
-In Zabbix:
+**not monitored** resolves within a minute. Every run then reports its start, exit code, duration and output.
 
-1. Import [zabbix/template_cron_jobs_zbxntfy.yaml](zabbix/template_cron_jobs_zbxntfy.yaml) and link **Cron jobs by zbxntfy** to the host.
-2. Set the host macro `{$JOB.GRACE:"zbxntfy-test"}` = `1m`.
+### Test job (optional)
 
-After 1–2 minutes, the existing jobs appear in *Latest data* and as **not monitored** problems.
-
-Test job:
+Set the host macro `{$JOB.GRACE:"zbxntfy-test"}` = `1m`, then:
 
 ```sh
-cat > /etc/cron.d/zbxntfy-test <<'EOF'
-*/2 * * * * root /usr/local/bin/zbxntfy -n zbxntfy-test sh -c 'echo "WARNING: test"; echo "ERROR: test"; exit 1'
-EOF
+cat > /etc/cron.d/zbxntfy-test <<'EOT'
+*/2 * * * * root zbxntfy -n zbxntfy-test sh -c 'echo "WARNING: test"; echo "ERROR: test"; exit 1'
+EOT
 ```
 
 | Check | Expected |
@@ -78,7 +86,7 @@ EOF
 | `systemctl stop cron` for ~4 min (RHEL: `crond`) | **did not start on schedule**; resolves after `systemctl start cron` and the next run |
 | `zbxntfy -dry-run -n x sh -c 'echo hi'` | prints the values instead of sending them |
 
-Remove `/etc/cron.d/zbxntfy-test` when done. For many hosts, use the [Ansible role](#2-host--ansible-also-from-semaphore).
+Remove `/etc/cron.d/zbxntfy-test` when done.
 
 ## How it works
 
@@ -154,44 +162,19 @@ Every trigger carries the tag `notify:<value>` from `zbxntfy -t <value>`. Create
 
 Add one more action for `notify = default`.
 
-## Installation
+## Installation on many hosts
 
-### 1. Template
+- **Packages:** use the commands from the [Quick start](#1-install-on-the-server-as-root) with any tool: Ansible `apt: deb=<url>` / `dnf: name=<url>`, Semaphore, or a shell loop.
+- **Ansible role ([ansible/](ansible/)):** copies locally built binaries, so it needs `make dist` first. It installs to `/usr/local/bin` and supports `zbxntfy_privilege: setcap | sudo | none`. It needs the `community.general` collection.
+- **Manual, without a package:** binaries from `zbxntfy_linux_amd64.tar.gz`:
+  ```sh
+  install -m 0755 zbxntfy zbxntfy-discovery /usr/local/bin/
+  setcap cap_dac_read_search+ep /usr/local/bin/zbxntfy-discovery
+  cp zabbix/userparameter_zbxntfy.conf /etc/zabbix/zabbix_agent2.d/    # agent 1: zabbix_agentd.d/
+  systemctl restart zabbix-agent2
+  ```
 
-Import [zabbix/template_cron_jobs_zbxntfy.yaml](zabbix/template_cron_jobs_zbxntfy.yaml) (Zabbix 7.0+) and link it to the hosts.
-The host must have active checks working: `ServerActive` and `Hostname` in the agent config.
-
-### 2. Host — Ansible (also from Semaphore)
-
-```sh
-make dist                                   # dist/amd64, dist/arm64
-ansible-playbook -i inventory ansible/site.yml
-```
-
-The role does the following:
-
-- installs `zabbix-sender`
-- copies the binaries to `/usr/local/bin`
-- sets `cap_dac_read_search` on `zbxntfy-discovery`
-- installs the UserParameter for agent and/or agent 2, then restarts the agent
-- checks that discovery works as user `zabbix`
-
-Variables are in [ansible/roles/zbxntfy/defaults/main.yml](ansible/roles/zbxntfy/defaults/main.yml). `zbxntfy_privilege` can be `setcap`, `sudo` or `none`.
-The role needs the `community.general` collection.
-
-### 2b. Host — .deb / .rpm
-
-`goreleaser release` builds packages that install to `/usr/bin`. The packages depend on `zabbix-sender`, set the capability, and register the UserParameter in the agent directories that exist.
-
-### 2c. Host — manual
-
-```sh
-install -m 0755 zbxntfy zbxntfy-discovery /usr/local/bin/
-setcap cap_dac_read_search+ep /usr/local/bin/zbxntfy-discovery
-cp zabbix/userparameter_zbxntfy.conf /etc/zabbix/zabbix_agent2.d/
-systemctl restart zabbix-agent2
-sudo -u zabbix /usr/local/bin/zbxntfy-discovery -pretty     # test
-```
+The host must have active checks working: `ServerActive`, plus `Hostname` equal to the host name in Zabbix.
 
 ## Macros
 
@@ -219,17 +202,31 @@ All macros can be overridden per host or per job with context, e.g. `{$JOB.WARN.
 - **Item keys:** the job name is sanitized to `[A-Za-z0-9_./-]`; other characters (space, comma, brackets, quotes) become `_`.
 - **Not discovered:** systemd timers and anacron-only jobs are not discovered yet. `/etc/cron.daily` and the other run-parts directories show up as a single job, e.g. `cron.daily`.
 
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `curl: (22) ... 404` right after a new release | GitHub Actions is still building the release (1–2 min). Wait until the *Actions* run is green. |
+| Template import keeps failing with an error that was already fixed | The browser saved an old cached copy, e.g. `template_cron_jobs_zbxntfy (1).yaml`. Download it again under a new name, or take it from `/usr/share/zbxntfy/`. |
+| *Execute now* → `wrong master item type` | Expected: all items come from the active agent or `zabbix_sender`, so Zabbix cannot poll them. Wait for the next minute, or run the job. |
+| *Cron jobs (raw)* has no data | Check `zabbix_agent2 -t zbxntfy.jobs`, `Include=` in the agent config, `Hostname=`/`ServerActive=`, and `/var/log/zabbix/zabbix_agent2.log`. |
+| `zbxntfy: zabbix_sender ... failed` printed by the wrapper | The job is not discovered yet, or `Hostname` does not match the host in Zabbix. |
+| *Error lines* item not supported | The regex macro is not a valid JavaScript regex. See [Macros](#macros). |
+
 ## Development
 
+Only needed when you change the code. Requires Go 1.22+ or Docker.
+
 ```sh
-make test     # go vet + unit tests (cron math, crontab parsing, name derivation)
-make dist
+git clone https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor.git && cd Zabbix-CRON-jobs-monitor
+make test     # go vet + unit tests (cron math, crontab parsing, name derivation, secret masking)
+make dist     # dist/amd64, dist/arm64
 ```
 
 ## Releasing
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.2 && git push origin v0.1.2
 ```
 
-GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)) runs the tests and then goreleaser. The release gets `zbxntfy_linux_{amd64,arm64}.tar.gz`, `.deb`, `.rpm` and `checksums.txt`.
+GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)) runs the tests and then goreleaser. The release gets `zbxntfy_linux_{amd64,arm64}.{deb,rpm,tar.gz}` and `checksums.txt`. The `releases/latest/download/...` links in this README always point to the newest release.
