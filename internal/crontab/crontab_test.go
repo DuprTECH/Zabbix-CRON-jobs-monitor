@@ -30,7 +30,7 @@ func TestIdentify(t *testing.T) {
 		{"[ -x /usr/lib/php/sessionclean ] && if [ ! -d /run/systemd/system ]; then /usr/lib/php/sessionclean; fi", "sessionclean", "default", 0},
 	}
 	for _, c := range cases {
-		n, m, g := identify(c.cmd)
+		n, m, g, _ := identify(c.cmd)
 		if n != c.name || m != c.monitored || g != c.notify {
 			t.Errorf("identify(%q) = %q,%d,%q; want %q,%d,%q", c.cmd, n, m, g, c.name, c.monitored, c.notify)
 		}
@@ -38,7 +38,10 @@ func TestIdentify(t *testing.T) {
 }
 
 func TestSimpleCommands(t *testing.T) {
-	got := simpleCommands(`a "b c" 'd' 2>&1 >> /var/log/x.log; e|f && g 2> err &> all`)
+	var got [][]string
+	for _, ws := range simpleCommands(`a "b c" 'd' 2>&1 >> /var/log/x.log; e|f && g 2> err &> all`) {
+		got = append(got, texts(ws))
+	}
 	want := [][]string{{"a", "b c", "d"}, {"e"}, {"f"}, {"g"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %q want %q", got, want)

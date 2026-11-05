@@ -25,6 +25,7 @@
   loop:
     - zbxntfy
     - zbxntfy-discovery
+    - zbxntfy-wrap
   notify: Restart zabbix agent
 
 - name: Allow zbxntfy-discovery to read user crontabs (setcap)

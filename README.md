@@ -38,11 +38,12 @@ For ARM servers, replace `amd64` with `arm64`.
 
 The package does the following:
 
-- installs `zbxntfy` and `zbxntfy-discovery` to `/usr/bin`
-- pulls in `zabbix-sender`, from the Zabbix repository, which must be configured on the host
+- installs `zbxntfy`, `zbxntfy-discovery` and `zbxntfy-wrap` to `/usr/bin`
+- installs `zabbix-sender` if it is missing, from the Zabbix repository, which must be configured on the host
 - sets `cap_dac_read_search` on `zbxntfy-discovery`, so the agent can read user crontabs
 - links the UserParameter into `/etc/zabbix/zabbix_agent2.d/` and/or `/etc/zabbix/zabbix_agentd.d/`
 - restarts the running agent
+- on the first interactive install, starts the [wizard](#3-wrap-jobs) that lets you pick the cron jobs to monitor. Skip it with `ZBXNTFY_NO_WIZARD=1 apt install ...`. It is also skipped automatically for non-interactive installs such as Ansible or `DEBIAN_FRONTEND=noninteractive`.
 
 The last command must print all cron jobs as JSON, with an empty `"errors"`.
 
@@ -58,15 +59,67 @@ To upgrade, run the same commands again.
 
 After 1–2 minutes, the cron jobs appear in *Latest data*, filtered by tag `component: cron`. Jobs not wrapped yet show up as **not monitored** problems.
 
-### 3. Wrap a job
+### 3. Wrap jobs
 
-Put `zbxntfy` in front of the command in the crontab:
+Run the wizard as root:
+
+```sh
+zbxntfy-wrap
+```
 
 ```
-40 2 * * *  zbxntfy /opt/zabbix-dump -q
+Select cron jobs to monitor with zbxntfy  (1 already monitored)
+↑/↓ move   space select   a all   n none   enter continue   q quit
+
+> [x] zabbix-dump                  40 2 * * *      /opt/./zabbix-dump -q
+  [x] suppress_longdown            20 0 * * *      ZBX_KEY=*** python3 /root/zabbix/suppress_longdown.py --apply
+  [ ] cron.daily                   25 6 * * *      test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }
+  ...
+```
+
+The wizard then:
+
+1. asks for an optional notification tag (`-t`),
+2. shows every line change (`-` old, `+` new; secrets are masked),
+3. asks for confirmation,
+4. backs up the affected crontabs and writes the changes:
+
+```
+/var/spool/cron/crontabs/root:12  zabbix-dump
+  - 40 2 * * * /opt/./zabbix-dump -q
+  + 40 2 * * * /usr/bin/zbxntfy /opt/./zabbix-dump -q
+
+changed /var/spool/cron/crontabs/root (2 job(s))
+        backup:  /var/backups/zbxntfy/20261105-174500/var/spool/cron/crontabs/root
+        restore: crontab -u root /var/backups/zbxntfy/20261105-174500/var/spool/cron/crontabs/root
 ```
 
 **not monitored** resolves within a minute. Every run then reports its start, exit code, duration and output.
+
+What `zbxntfy-wrap` does:
+
+- Inserts `zbxntfy` exactly in front of the job's command:
+  - after `cd /x &&`
+  - after `VAR=value`
+  - inside `if …; then` and `{ …; }`
+  
+  Redirects and everything else stay unchanged.
+- Re-parses every changed line and checks that discovery will see it as the same job, now monitored.
+- Backs up every affected file to `/var/backups/zbxntfy/<timestamp>/` before writing. Each change prints its own restore command.
+- `/etc/crontab` and `/etc/cron.d/*`: replaced atomically, keeping owner and mode.
+- User crontabs: installed with `crontab -u <user> -`, so cron reloads them.
+- Refuses to write a file that changed since it was read.
+
+Non-interactive use, for scripts and Ansible:
+
+```sh
+zbxntfy-wrap -list                                # jobs not monitored yet
+zbxntfy-wrap zabbix-dump laps-runner              # show the change only
+zbxntfy-wrap -apply zabbix-dump laps-runner       # back up, then change
+zbxntfy-wrap -all -exclude '^(cron\.|e2scrub|sessionclean)' -t IT_ops -apply
+```
+
+You can also edit the crontab by hand: put `zbxntfy` in front of the command, e.g. `40 2 * * *  zbxntfy /opt/zabbix-dump -q`.
 
 ### Test job (optional)
 
@@ -106,6 +159,7 @@ Remove `/etc/cron.d/zbxntfy-test` when done.
 |---|---|
 | `zbxntfy-discovery` | Called by the agent through a UserParameter. Lists all cron jobs and marks which ones are wrapped with `zbxntfy`. For each job it also returns when it last should have run and when it runs next. |
 | `zbxntfy` | Wrapper used in the crontab. Runs the command and passes its output and exit code through unchanged, so cron mail and redirects keep working. Reports the run to Zabbix through `zabbix_sender`. |
+| `zbxntfy-wrap` | Wizard and CLI that put `zbxntfy` in front of existing cron jobs. It backs up the crontabs before writing. |
 | Template **Cron jobs by zbxntfy** | Does all the evaluation: LLD, the error/warning regexes, the triggers, and the alert text. The host needs no configuration. |
 
 ### Life cycle of a job
@@ -219,7 +273,7 @@ Only needed when you change the code. Requires Go 1.22+ or Docker.
 
 ```sh
 git clone https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor.git && cd Zabbix-CRON-jobs-monitor
-make test     # go vet + unit tests (cron math, crontab parsing, name derivation, secret masking)
+make test     # go vet + unit tests (cron math, crontab parsing, name derivation, secret masking, crontab rewriting)
 make dist     # dist/amd64, dist/arm64
 ```
 

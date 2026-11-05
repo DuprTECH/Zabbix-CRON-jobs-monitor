@@ -33,6 +33,13 @@ type Job struct {
 
 	sched *cronexpr.Schedule
 	loc   *time.Location
+
+	// for zbxntfy-wrap
+	file     string // real path of the crontab
+	lineNo   int    // 1-based line number
+	rawLine  string // line as it is in the file
+	insertAt int    // byte offset in rawLine where "zbxntfy " can be inserted, -1 if unknown
+	baseName string // name before de-duplication
 }
 
 // Times returns the previous and next activation (unix seconds, 0 if none).
@@ -94,6 +101,21 @@ func (s Scanner) Scan() ([]Job, []string) {
 	return jobs, errs
 }
 
+// FilePath returns the real path of the crontab the job comes from.
+func (j *Job) FilePath() string { return j.file }
+
+// LineNo returns the 1-based line number of the job in its crontab.
+func (j *Job) LineNo() int { return j.lineNo }
+
+// RawLine returns the job's line exactly as it is in the crontab.
+func (j *Job) RawLine() string { return j.rawLine }
+
+// SystemCrontab reports whether the job is in /etc/crontab or /etc/cron.d
+// (with a user field), as opposed to a user crontab in /var/spool/cron.
+func (j *Job) SystemCrontab() bool {
+	return !strings.Contains(filepath.ToSlash(j.Source), "/var/spool/cron/")
+}
+
 var ignoredName = regexp.MustCompile(`(^\.|~$|\.(dpkg-[a-z]+|rpm[a-z]+|ucf-[a-z]+|swp|bak|orig|disabled)$|^placeholder$)`)
 
 func listFiles(dir string, errs *[]string, runParts bool) []string {
@@ -145,7 +167,9 @@ func parseFile(file string, system bool, user string) ([]Job, []string) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for n := 1; sc.Scan(); n++ {
-		line := strings.TrimSpace(sc.Text())
+		raw := sc.Text()
+		line := strings.TrimSpace(raw)
+		lead := len(raw) - len(strings.TrimLeft(raw, " \t\r\n\v\f"))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -169,6 +193,13 @@ func parseFile(file string, system bool, user string) ([]Job, []string) {
 		j.Source = file
 		j.TZ = tz
 		j.loc = loc
+		j.file = file
+		j.lineNo = n
+		j.rawLine = raw
+		if j.insertAt >= 0 {
+			j.insertAt += lead
+		}
+		j.baseName = j.Name
 		jobs = append(jobs, *j)
 	}
 	if err := sc.Err(); err != nil {
@@ -204,11 +235,33 @@ func parseLine(line string, system bool, user string) (*Job, error) {
 		}
 		rest = afterFields(rest, 1)
 	}
+	restOff := len(line) - len(rest)
 	cmd := cronCommand(rest)
 
 	j := &Job{User: user, Schedule: spec, Command: MaskSecrets(cmd), Notify: "default", sched: sched}
-	j.Name, j.Monitored, j.Notify = identify(cmd)
+	var at int
+	// identify on the raw text (up to the first unescaped %), so that word
+	// offsets point into the line; "\%" tokenizes to "%" just like cron does.
+	j.Name, j.Monitored, j.Notify, at = identify(rawCronCommand(rest))
+	j.insertAt = -1
+	if at >= 0 {
+		j.insertAt = restOff + at
+	}
 	return j, nil
+}
+
+// rawCronCommand returns s up to the first unescaped '%', unchanged.
+func rawCronCommand(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+			continue
+		}
+		if s[i] == '%' {
+			return s[:i]
+		}
+	}
+	return s
 }
 
 // afterFields returns s without its first n whitespace-separated fields.
@@ -256,11 +309,13 @@ var shellKeywords = map[string]bool{
 	"while": true, "until": true, "{": true, "!": true, "exec": true,
 }
 
-// identify returns the job name, whether it is wrapped with zbxntfy and its
-// notification group.
-func identify(cmd string) (name string, monitored int, notify string) {
+// identify returns the job name, whether it is wrapped with zbxntfy, its
+// notification tag value and the byte offset in cmd where "zbxntfy " would be
+// inserted (the start of the job's command, -1 if none).
+func identify(cmd string) (name string, monitored int, notify string, insertAt int) {
 	cmds := simpleCommands(cmd)
-	for _, words := range cmds {
+	for _, ws := range cmds {
+		words := texts(ws)
 		for i, w := range words {
 			if path.Base(w) == WrapperName {
 				o, err := cli.Parse(words[i+1:])
@@ -271,23 +326,24 @@ func identify(cmd string) (name string, monitored int, notify string) {
 				if notify == "" {
 					notify = "default"
 				}
-				return o.Name, 1, notify
+				return o.Name, 1, notify, -1
 			}
 		}
 	}
-	for _, words := range cmds {
+	for _, ws := range cmds {
+		words := texts(ws)
 		k := 0
 		for k < len(words) && (envLine.MatchString(words[k]) || shellKeywords[words[k]]) {
 			k++
 		}
 		if k < len(words) && !helperCommands[path.Base(words[k])] {
-			return cli.Sanitize(cli.DeriveName(words[k:])), 0, "default"
+			return cli.Sanitize(cli.DeriveName(words[k:])), 0, "default", ws[k].pos
 		}
 	}
 	if len(cmds) > 0 {
-		return cli.Sanitize(cli.DeriveName(cmds[0])), 0, "default"
+		return cli.Sanitize(cli.DeriveName(texts(cmds[0]))), 0, "default", cmds[0][0].pos
 	}
-	return "job", 0, "default"
+	return "job", 0, "default", -1
 }
 
 // dedupe keeps job names unique: monitored entries win, then the first one

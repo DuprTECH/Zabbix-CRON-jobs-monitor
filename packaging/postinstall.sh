@@ -1,4 +1,7 @@
 #!/bin/sh
+# deb: $1 = configure, $2 = previous version (empty on first install)
+# rpm: $1 = number of installed versions (1 on first install)
+
 # Allow the agent (user zabbix) to read user crontabs in /var/spool/cron.
 if command -v setcap >/dev/null 2>&1; then
     setcap cap_dac_read_search+ep /usr/bin/zbxntfy-discovery || \
@@ -19,4 +22,20 @@ for s in zabbix-agent2 zabbix-agent; do
         systemctl restart "$s" || true
     fi
 done
+
+# First install: offer the wizard that puts zbxntfy in front of existing cron
+# jobs, but only when installed interactively from a terminal.
+first_install=no
+case "$1" in
+    configure) [ -z "$2" ] && first_install=yes ;;
+    1) first_install=yes ;;
+esac
+if [ "$first_install" = yes ] \
+   && [ "${DEBIAN_FRONTEND:-}" != noninteractive ] \
+   && [ -z "${ZBXNTFY_NO_WIZARD:-}" ] \
+   && [ -t 1 ] && { : </dev/tty; } 2>/dev/null; then
+    /usr/bin/zbxntfy-wrap </dev/tty >/dev/tty 2>&1 || true
+else
+    echo "zbxntfy: run 'zbxntfy-wrap' to choose which cron jobs to monitor."
+fi
 exit 0

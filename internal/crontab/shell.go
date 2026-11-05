@@ -13,20 +13,42 @@ const (
 type token struct {
 	text        string
 	kind        tokKind
+	pos         int  // byte offset of the token in the input
 	needsTarget bool // redirection whose target is the next word
+}
+
+// word is a shell word and its byte offset in the command line.
+type word struct {
+	text string
+	pos  int
 }
 
 // shellSplit is a small, forgiving POSIX-shell tokenizer. It is only used to
 // find command names in crontab lines, not to execute anything.
 func shellSplit(s string) []token {
+	r := []rune(s)
+	off := make([]int, len(r)+1) // byte offset of each rune
+	for i, b := 0, 0; i < len(r); i++ {
+		off[i] = b
+		b += len(string(r[i]))
+		off[i+1] = b
+	}
+
 	var (
 		toks   []token
 		cur    strings.Builder
 		inWord bool
+		wstart int
 	)
+	begin := func(i int) {
+		if !inWord {
+			inWord = true
+			wstart = off[i]
+		}
+	}
 	flush := func() {
 		if inWord {
-			toks = append(toks, token{text: cur.String(), kind: tokWord})
+			toks = append(toks, token{text: cur.String(), kind: tokWord, pos: wstart})
 			cur.Reset()
 			inWord = false
 		}
@@ -42,7 +64,6 @@ func shellSplit(s string) []token {
 		}
 		return true
 	}
-	r := []rune(s)
 	for i := 0; i < len(r); i++ {
 		c := r[i]
 		switch {
@@ -52,18 +73,18 @@ func shellSplit(s string) []token {
 			flush()
 			return toks
 		case c == '\\':
-			inWord = true
+			begin(i)
 			if i+1 < len(r) {
 				i++
 				cur.WriteRune(r[i])
 			}
 		case c == '\'':
-			inWord = true
+			begin(i)
 			for i++; i < len(r) && r[i] != '\''; i++ {
 				cur.WriteRune(r[i])
 			}
 		case c == '"':
-			inWord = true
+			begin(i)
 			for i++; i < len(r) && r[i] != '"'; i++ {
 				if r[i] == '\\' && i+1 < len(r) && strings.ContainsRune("\"\\$`", r[i+1]) {
 					i++
@@ -71,9 +92,9 @@ func shellSplit(s string) []token {
 				cur.WriteRune(r[i])
 			}
 		case c == '>' || c == '<':
-			op := ""
+			op, pos := "", off[i]
 			if inWord && allDigits(cur.String()) {
-				op = cur.String()
+				op, pos = cur.String(), wstart
 				cur.Reset()
 				inWord = false
 			}
@@ -93,26 +114,28 @@ func shellSplit(s string) []token {
 					complete = true
 				}
 			}
-			toks = append(toks, token{text: op, kind: tokRedir, needsTarget: !complete})
+			toks = append(toks, token{text: op, kind: tokRedir, pos: pos, needsTarget: !complete})
 		case c == '&' && i+1 < len(r) && r[i+1] == '>':
 			flush()
+			pos := off[i]
 			i++
 			op := "&>"
 			if i+1 < len(r) && r[i+1] == '>' {
 				i++
 				op += ">"
 			}
-			toks = append(toks, token{text: op, kind: tokRedir, needsTarget: true})
+			toks = append(toks, token{text: op, kind: tokRedir, pos: pos, needsTarget: true})
 		case c == ';' || c == '|' || c == '&' || c == '(' || c == ')':
 			flush()
+			pos := off[i]
 			op := string(c)
 			if i+1 < len(r) && (c == '&' || c == '|' || c == ';') && (r[i+1] == c || (c == '|' && r[i+1] == '&')) {
 				i++
 				op += string(r[i])
 			}
-			toks = append(toks, token{text: op, kind: tokSep})
+			toks = append(toks, token{text: op, kind: tokSep, pos: pos})
 		default:
-			inWord = true
+			begin(i)
 			cur.WriteRune(c)
 		}
 	}
@@ -122,10 +145,10 @@ func shellSplit(s string) []token {
 
 // simpleCommands splits a command line into simple commands (lists of words),
 // dropping separators and redirections.
-func simpleCommands(s string) [][]string {
+func simpleCommands(s string) [][]word {
 	var (
-		out  [][]string
-		cur  []string
+		out  [][]word
+		cur  []word
 		skip bool
 	)
 	for _, t := range shellSplit(s) {
@@ -142,11 +165,19 @@ func simpleCommands(s string) [][]string {
 				skip = false
 				continue
 			}
-			cur = append(cur, t.text)
+			cur = append(cur, word{t.text, t.pos})
 		}
 	}
 	if len(cur) > 0 {
 		out = append(out, cur)
+	}
+	return out
+}
+
+func texts(ws []word) []string {
+	out := make([]string, len(ws))
+	for i, w := range ws {
+		out[i] = w.text
 	}
 	return out
 }
