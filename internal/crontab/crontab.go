@@ -206,7 +206,7 @@ func parseLine(line string, system bool, user string) (*Job, error) {
 	}
 	cmd := cronCommand(rest)
 
-	j := &Job{User: user, Schedule: spec, Command: cmd, Notify: "default", sched: sched}
+	j := &Job{User: user, Schedule: spec, Command: MaskSecrets(cmd), Notify: "default", sched: sched}
 	j.Name, j.Monitored, j.Notify = identify(cmd)
 	return j, nil
 }

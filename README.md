@@ -211,6 +211,7 @@ All macros can be overridden per host or per job with context, e.g. `{$JOB.WARN.
 
 ## Notes and limits
 
+- **Secrets in crontabs:** the command line is sent to Zabbix and appears in alerts as `{#CMD}`. Likely secrets are replaced by `***` before sending: `*KEY=`, `*TOKEN=`, `*PASSWORD=`, `--password`, `--api-key`, `-pSECRET` and `user:pass@` in URLs. Keeping secrets out of crontabs, e.g. in an env file read by the script, is still better.
 - **User crontabs** (`crontab -e`) live in `/var/spool/cron` and only root can read them. Without `setcap` or sudo, discovery sees only `/etc/crontab` and `/etc/cron.d`, and the "cannot read" trigger tells you so.
 - **TLS PSK:** `zabbix_sender` uses the TLS settings from the agent config. A job that runs as a non-root user must be able to read the PSK file, e.g. by being a member of group `zabbix`.
 - **Output size:** at most 60000 bytes (the tail) are sent. This stays within the MySQL `history_text` limit. Errors earlier in very long output are cut off.
