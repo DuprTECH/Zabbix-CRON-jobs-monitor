@@ -230,3 +230,17 @@ git tag v0.1.2 && git push origin v0.1.2
 ```
 
 GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)) runs the tests and then goreleaser. The release gets `zbxntfy_linux_{amd64,arm64}.{deb,rpm,tar.gz}` and `checksums.txt`. The `releases/latest/download/...` links in this README always point to the newest release.
+
+## Support
+
+Need something extra? I can extend or customize it for your company's needs, for example systemd timers, other alerting backends, or rollout through your own repositories. Feel free to get in touch: 📧 [info@duprtech.sk](mailto:info@duprtech.sk)
+
+If this work makes sense to you, give the repo a ⭐ star or support me on Ko-fi ☕
+
+I'm adding more tools and templates over time, so feel free to [follow me on GitHub](https://github.com/DuprTECH) to see what's new.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/duprtech)
+
+## License
+
+[MIT](LICENSE)

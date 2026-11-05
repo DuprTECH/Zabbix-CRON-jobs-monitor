@@ -27,6 +27,7 @@ archives:
     name_template: "zbxntfy_linux_{{ .Arch }}"
     files:
       - README.md
+      - LICENSE
       - zabbix/**/*
 
 nfpms:
@@ -34,6 +35,7 @@ nfpms:
     vendor: DuprTECH
     homepage: https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor
     maintainer: DuprTECH
+    license: MIT
     description: Cron job monitoring for Zabbix (discovery via agent, results via zabbix_sender).
     formats: [deb, rpm]
     file_name_template: "{{ .PackageName }}_linux_{{ .Arch }}"
