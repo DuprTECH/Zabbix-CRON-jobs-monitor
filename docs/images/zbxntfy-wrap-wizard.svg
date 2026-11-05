@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1326" height="432" viewBox="0 0 1326 432" font-family="'DejaVu Sans Mono','Cascadia Mono',Consolas,Menlo,monospace" font-size="14" xml:space="preserve">
+<rect width="100%" height="100%" rx="8" fill="#0c0c0c"/>
+<text x="16.0" y="28.0" ><tspan font-weight="bold" fill="#ffffff">Select cron jobs to monitor with zbxntfy</tspan><tspan fill="#cccccc">  (1 already monitored)</tspan></text>
+<text x="16.0" y="50.0" fill="#8a8a8a">↑/↓ move   space select   a all   n none   enter continue   q quit</text>
+<text x="16.0" y="94.0" fill="#cccccc">  [ ] cron.hourly                  17 * * * *      cd / &amp;&amp; run-parts --report /etc/cron.hourly</text>
+<text x="16.0" y="116.0" fill="#cccccc">  [ ] cron.daily                   25 6 * * *      test -x /usr/sbin/anacron || { cd / &amp;&amp; run-parts --report /etc/cron.daily; }</text>
+<text x="16.0" y="138.0" fill="#cccccc">  [ ] cron.weekly                  47 6 * * 7      test -x /usr/sbin/anacron || { cd / &amp;&amp; run-parts --report /etc/cron.weekly; }</text>
+<text x="16.0" y="160.0" fill="#cccccc">  [ ] cron.monthly                 52 6 1 * *      test -x /usr/sbin/anacron || { cd / &amp;&amp; run-parts --report /etc/cron.monthly; }</text>
+<rect x="16.0" y="166.0" width="663.6" height="22.0" fill="#cccccc"/>
+<text x="16.0" y="182.0" fill="#0c0c0c">&gt; [ ] cert-renew                   45 1 * * *      /opt/certs/bin/cert-renew.sh</text>
+<text x="16.0" y="204.0" fill="#cccccc">  [ ] e2scrub_all_cron             30 3 * * 0      test -e /run/systemd/system || SERVICE_MODE=1 /usr/lib/x86_64-linux-gnu/e2fsprogs/e2scrub_all_cron</text>
+<text x="16.0" y="226.0" fill="#cccccc">  [ ] e2scrub_all                  10 3 * * *      test -e /run/systemd/system || SERVICE_MODE=1 /sbin/e2scrub_all -A -r</text>
+<text x="16.0" y="248.0" fill="#cccccc">  [ ] sessionclean                 09,39 * * * *   [ -x /usr/lib/php/sessionclean ] &amp;&amp; if [ ! -d /run/systemd/system ]; then /usr/lib/php/sessionclean; fi</text>
+<text x="16.0" y="270.0" fill="#cccccc">  [<tspan fill="#16c60c">x</tspan>] backup-db                    40 2 * * *      /opt/backup/backup-db.sh -q</text>
+<text x="16.0" y="292.0" fill="#cccccc">  [<tspan fill="#16c60c">x</tspan>] report_daily                 30 0 * * *      python3 /opt/scripts/report_daily.py</text>
+<text x="16.0" y="314.0" fill="#cccccc">  [<tspan fill="#16c60c">x</tspan>] sync_inventory               5 */3 * * *     python3 /opt/scripts/sync_inventory.py</text>
+<text x="16.0" y="336.0" fill="#cccccc">  [<tspan fill="#16c60c">x</tspan>] cleanup_api                  20 0 * * *      API_TOKEN=*** python3 /opt/scripts/cleanup_api.py --apply</text>
+<text x="16.0" y="358.0" fill="#cccccc">  [<tspan fill="#16c60c">x</tspan>] rotate-logs                  0 */6 * * *     PATH=/usr/sbin:/usr/bin:/bin /usr/sbin/rotate-logs</text>
+<text x="16.0" y="402.0" fill="#cccccc">5 of 13 selected   /etc/cron.d/cert-renew (root)</text>
+</svg>

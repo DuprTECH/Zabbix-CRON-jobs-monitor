@@ -35,8 +35,8 @@ Puts zbxntfy in front of cron jobs that are not monitored yet.
 
   zbxntfy-wrap                          wizard: pick jobs, review, confirm
   zbxntfy-wrap -list                    list jobs that are not monitored
-  zbxntfy-wrap zabbix-dump laps-runner  show the change for these jobs
-  zbxntfy-wrap -apply zabbix-dump       back up the crontab, then change it
+  zbxntfy-wrap backup-db rotate-logs  show the change for these jobs
+  zbxntfy-wrap -apply backup-db       back up the crontab, then change it
   zbxntfy-wrap -all -exclude '^cron\.' -apply
 
 Options:

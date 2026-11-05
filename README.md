@@ -67,15 +67,7 @@ Run the wizard as root:
 zbxntfy-wrap
 ```
 
-```
-Select cron jobs to monitor with zbxntfy  (1 already monitored)
-↑/↓ move   space select   a all   n none   enter continue   q quit
-
-> [x] zabbix-dump                  40 2 * * *      /opt/./zabbix-dump -q
-  [x] suppress_longdown            20 0 * * *      ZBX_KEY=*** python3 /root/zabbix/suppress_longdown.py --apply
-  [ ] cron.daily                   25 6 * * *      test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }
-  ...
-```
+![zbxntfy-wrap wizard: pick cron jobs with arrow keys and space](docs/images/zbxntfy-wrap-wizard.svg)
 
 The wizard then:
 
@@ -85,9 +77,9 @@ The wizard then:
 4. backs up the affected crontabs and writes the changes:
 
 ```
-/var/spool/cron/crontabs/root:12  zabbix-dump
-  - 40 2 * * * /opt/./zabbix-dump -q
-  + 40 2 * * * /usr/bin/zbxntfy /opt/./zabbix-dump -q
+/var/spool/cron/crontabs/root:12  backup-db
+  - 40 2 * * * /opt/./backup-db -q
+  + 40 2 * * * /usr/bin/zbxntfy /opt/./backup-db -q
 
 changed /var/spool/cron/crontabs/root (2 job(s))
         backup:  /var/backups/zbxntfy/20261105-174500/var/spool/cron/crontabs/root
@@ -114,12 +106,12 @@ Non-interactive use, for scripts and Ansible:
 
 ```sh
 zbxntfy-wrap -list                                # jobs not monitored yet
-zbxntfy-wrap zabbix-dump laps-runner              # show the change only
-zbxntfy-wrap -apply zabbix-dump laps-runner       # back up, then change
+zbxntfy-wrap backup-db rotate-logs              # show the change only
+zbxntfy-wrap -apply backup-db rotate-logs       # back up, then change
 zbxntfy-wrap -all -exclude '^(cron\.|e2scrub|sessionclean)' -t IT_ops -apply
 ```
 
-You can also edit the crontab by hand: put `zbxntfy` in front of the command, e.g. `40 2 * * *  zbxntfy /opt/zabbix-dump -q`.
+You can also edit the crontab by hand: put `zbxntfy` in front of the command, e.g. `40 2 * * *  zbxntfy /opt/backup/backup-db.sh -q`.
 
 ### Test job (optional)
 
