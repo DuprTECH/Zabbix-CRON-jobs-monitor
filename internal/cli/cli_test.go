@@ -6,11 +6,11 @@ import (
 )
 
 func TestParse(t *testing.T) {
-	o, err := Parse([]string{"-n", "zaloha-db", "-g", "IT_ops", "/opt/zaloha.sh", "--db", "-v"})
+	o, err := Parse([]string{"-n", "zaloha-db", "-t", "IT_ops", "/opt/zaloha.sh", "--db", "-v"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Name != "zaloha-db" || o.Group != "IT_ops" || !reflect.DeepEqual(o.Cmd, []string{"/opt/zaloha.sh", "--db", "-v"}) {
+	if o.Name != "zaloha-db" || o.Notify != "IT_ops" || !reflect.DeepEqual(o.Cmd, []string{"/opt/zaloha.sh", "--db", "-v"}) {
 		t.Errorf("got %+v", o)
 	}
 	o, err = Parse([]string{"--", "/opt/x/backup.sh"})
@@ -37,7 +37,7 @@ func TestDeriveName(t *testing.T) {
 			t.Errorf("DeriveName(%q) = %q, want %q", cmd, got, want)
 		}
 	}
-	if Sanitize("my job/[1]") != "my_job_1" {
-		t.Error(Sanitize("my job/[1]"))
+	if Sanitize("my job,[1]") != "my_job_1" || Sanitize("/opt/scripts/zaloha.sh") != "/opt/scripts/zaloha.sh" {
+		t.Error(Sanitize("my job,[1]"), Sanitize("/opt/scripts/zaloha.sh"))
 	}
 }

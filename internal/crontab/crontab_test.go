@@ -17,8 +17,9 @@ func TestIdentify(t *testing.T) {
 		{"/opt/scripts/zaloha.sh", "zaloha", "default", 0},
 		{"/opt/scripts/zaloha.sh > /dev/null 2>&1", "zaloha", "default", 0},
 		{"zbxntfy /opt/scripts/zaloha.sh", "zaloha", "default", 1},
-		{"/usr/local/bin/zbxntfy -n zaloha-db -g IT_ops /opt/scripts/zaloha.sh --db >/dev/null 2>&1", "zaloha-db", "IT_ops", 1},
+		{"/usr/local/bin/zbxntfy -n zaloha-db -t IT_ops /opt/scripts/zaloha.sh --db >/dev/null 2>&1", "zaloha-db", "IT_ops", 1},
 		{"cd /opt/app && zbxntfy ./run.sh", "run", "default", 1},
+		{"zbxntfy -n /opt/scripts/zaloha.sh /opt/scripts/zaloha.sh", "/opt/scripts/zaloha.sh", "default", 1},
 		{"cd /opt/app && ./run.sh", "run", "default", 0},
 		{"cd / && run-parts --report /etc/cron.hourly", "cron.hourly", "default", 0},
 		{"test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }", "cron.daily", "default", 0},
@@ -64,7 +65,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 `)
 	write(t, root, "etc/cron.d/backup", `# backups
 CRON_TZ=UTC
-0 2 * * 1-5 root zbxntfy -g IT_ops /opt/scripts/zaloha.sh
+0 2 * * 1-5 root zbxntfy -t IT_ops /opt/scripts/zaloha.sh
 @reboot root /opt/scripts/warmup.sh
 bad line here
 `)

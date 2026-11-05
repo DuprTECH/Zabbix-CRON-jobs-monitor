@@ -16,12 +16,12 @@ zabbix_export:
         - Jobs that are not prefixed with "zbxntfy" raise "not monitored".
         - A job prefixed with zbxntfy reports its start, exit code, duration and output via zabbix_sender:
               0 2 * * *  zbxntfy /opt/scripts/backup.sh
-              0 3 * * *  zbxntfy -n backup-db -g IT_ops /opt/scripts/backup.sh --db
+              0 3 * * *  zbxntfy -n backup-db -t IT_ops /opt/scripts/backup.sh --db
         - Output lines matching {$JOB.ERROR.REGEX} / {$JOB.WARN.REGEX} (minus {$JOB.IGNORE.REGEX}) raise
           problems; the alert contains the matching lines and the last {$JOB.TAIL.LINES} lines of output.
           Regexes are JavaScript, case-insensitive; "/" must be written as "\/".
           Per-job overrides use context macros, e.g. {$JOB.WARN.REGEX:"backup"}.
-        - Trigger tag notify:<group> comes from "zbxntfy -g <group>" (default: "default"); use it in actions
+        - Trigger tag notify:<value> comes from "zbxntfy -t <value>" (default: "default"); use it in actions
           to route alerts to user groups.
 
         Requires: zbxntfy, zbxntfy-discovery and zabbix_sender on the host, plus userparameter_zbxntfy.conf.

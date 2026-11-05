@@ -42,7 +42,7 @@ Runs the command and reports exit code, duration and output to Zabbix.
 Example crontab entries:
 
   0 2 * * *  zbxntfy /opt/scripts/backup.sh
-  0 3 * * *  zbxntfy -n backup-db -g dba /opt/scripts/backup.sh --db
+  0 3 * * *  zbxntfy -n backup-db -t dba /opt/scripts/backup.sh --db
 
 Options:
 `

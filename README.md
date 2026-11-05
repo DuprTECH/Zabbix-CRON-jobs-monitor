@@ -9,8 +9,59 @@ Discovers **every** cron job on a host. For jobs you wrap with `zbxntfy`, Zabbix
 
 ```
 0 2 * * *  root  zbxntfy /opt/scripts/backup.sh
-0 3 * * *  root  zbxntfy -n backup-db -g IT_ops /opt/scripts/backup.sh --db
+0 3 * * *  root  zbxntfy -n backup-db -t IT_ops /opt/scripts/backup.sh --db
 ```
+
+## Quick start (clone and test on one server)
+
+Build the binaries on any machine with Go 1.22+ or Docker:
+
+```sh
+git clone https://github.com/DuprTECH/Zabbix-CRON-jobs-monitor.git
+cd Zabbix-CRON-jobs-monitor
+make test dist          # without make: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/amd64/ ./cmd/...
+# or, with Docker only:
+docker run --rm -v "$PWD":/src -w /src golang:1.23 sh -c 'go test ./... && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/amd64/ ./cmd/...'
+```
+
+The result is `dist/amd64/zbxntfy` and `dist/amd64/zbxntfy-discovery`, for `x86_64` servers. Use `arm64` for ARM.
+
+On the server, as root:
+
+```sh
+install -m 0755 dist/amd64/zbxntfy dist/amd64/zbxntfy-discovery /usr/local/bin/
+apt install zabbix-sender libcap2-bin           # RHEL: dnf install zabbix-sender libcap
+setcap cap_dac_read_search+ep /usr/local/bin/zbxntfy-discovery
+sudo -u zabbix /usr/local/bin/zbxntfy-discovery -pretty     # should list all cron jobs, empty "errors"
+
+cp zabbix/userparameter_zbxntfy.conf /etc/zabbix/zabbix_agent2.d/   # agent 1: /etc/zabbix/zabbix_agentd.d/
+systemctl restart zabbix-agent2
+```
+
+In Zabbix:
+
+1. Import [zabbix/template_cron_jobs_zbxntfy.yaml](zabbix/template_cron_jobs_zbxntfy.yaml) and link **Cron jobs by zbxntfy** to the host.
+2. Set the host macro `{$JOB.GRACE:"zbxntfy-test"}` = `1m`.
+
+After 1–2 minutes, the existing jobs appear in *Latest data* and as **not monitored** problems.
+
+Test job:
+
+```sh
+cat > /etc/cron.d/zbxntfy-test <<'EOF'
+*/2 * * * * root /usr/local/bin/zbxntfy -n zbxntfy-test sh -c 'echo "WARNING: test"; echo "ERROR: test"; exit 1'
+EOF
+```
+
+| Check | Expected |
+|---|---|
+| ~1 min after creating the file | job `zbxntfy-test` discovered, *Monitored* = 1 |
+| after the first run | problems **failed with exit code 1** and **errors in output**; item *Error lines* = `ERROR: test` |
+| change the command to `sh -c 'echo OK'` | problems resolve after the next run |
+| `systemctl stop cron` for ~4 min (RHEL: `crond`) | **did not start on schedule**; resolves after `systemctl start cron` and the next run |
+| `zbxntfy -dry-run -n x sh -c 'echo hi'` | prints the values instead of sending them |
+
+Remove `/etc/cron.d/zbxntfy-test` when done. For many hosts, use the [Ansible role](#2-host--ansible-also-from-semaphore).
 
 ## How it works
 
@@ -60,8 +111,9 @@ Triggers for `@reboot` jobs that depend on the schedule are not created.
 ```
 zbxntfy [options] [--] command [args...]
 
-  -n name    job name (default: derived from the command, e.g. /opt/x/backup.sh → backup)
-  -g group   notification group → trigger tag notify:<group> (default: "default")
+  -n name    job name (default: derived from the command, e.g. /opt/x/backup.sh → backup);
+             a full path is allowed: -n /opt/x/backup.sh
+  -t value   trigger tag notify:<value> for alert routing (default: "default")
   -c file    agent config for zabbix_sender (default: /etc/zabbix/zabbix_agent2.conf, then zabbix_agentd.conf)
   -s host    host name in Zabbix (default: Hostname from the agent config)
   -z server  Zabbix server/proxy (default: ServerActive from the agent config)
@@ -75,9 +127,9 @@ zbxntfy [options] [--] command [args...]
 - The job name is derived the same way in discovery and in the wrapper, so wrapping a job keeps its name and history. Use `-n` when one script runs with different arguments.
 - Name derivation looks past `bash x.sh`, `python3 x.py`, `nice`, `ionice`, `timeout`, `flock`, `sudo`, `env VAR=…` and `run-parts DIR`.
 
-### Alert routing (groups)
+### Alert routing (-t)
 
-Every trigger carries the tag `notify:<group>`. Create one action per group in Zabbix:
+Every trigger carries the tag `notify:<value>` from `zbxntfy -t <value>`. Create one action per value in Zabbix:
 
 - *Alerts → Actions → Trigger actions*
 - Condition: **Tag `notify` equals `IT_ops`**
@@ -146,7 +198,7 @@ All macros can be overridden per host or per job with context, e.g. `{$JOB.WARN.
 - **TLS PSK:** `zabbix_sender` uses the TLS settings from the agent config. A job that runs as a non-root user must be able to read the PSK file, e.g. by being a member of group `zabbix`.
 - **Output size:** at most 60000 bytes (the tail) are sent. This stays within the MySQL `history_text` limit. Errors earlier in very long output are cut off.
 - **Time zone:** schedules are computed in the server's local time, or in `CRON_TZ` if it is set in the crontab.
-- **Item keys:** the job name is sanitized to `[A-Za-z0-9_.-]`.
+- **Item keys:** the job name is sanitized to `[A-Za-z0-9_./-]`; other characters (space, comma, brackets, quotes) become `_`.
 - **Not discovered:** systemd timers and anacron-only jobs are not discovered yet. `/etc/cron.daily` and the other run-parts directories show up as a single job, e.g. `cron.daily`.
 
 ## Development

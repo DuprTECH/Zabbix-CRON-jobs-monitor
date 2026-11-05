@@ -267,7 +267,7 @@ func identify(cmd string) (name string, monitored int, notify string) {
 				if err != nil {
 					break // broken invocation: treat as not monitored
 				}
-				notify = o.Group
+				notify = o.Notify
 				if notify == "" {
 					notify = "default"
 				}

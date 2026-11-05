@@ -16,7 +16,7 @@ import (
 // Options are the parsed zbxntfy arguments.
 type Options struct {
 	Name        string // -n: job name (default: derived from the command)
-	Group       string // -g: notification group, exposed to Zabbix as a trigger tag
+	Notify      string // -t: value of trigger tag notify:<value> (alert routing in Zabbix actions)
 	AgentConfig string // -c: agent config passed to zabbix_sender
 	Hostname    string // -s: host name in Zabbix
 	Server      string // -z: Zabbix server/proxy (when no agent config is used)
@@ -36,7 +36,7 @@ const DefaultMaxBytes = 60000
 func NewFlagSet(o *Options) *flag.FlagSet {
 	fs := flag.NewFlagSet("zbxntfy", flag.ContinueOnError)
 	fs.StringVar(&o.Name, "n", "", "job `name` (default: derived from the command)")
-	fs.StringVar(&o.Group, "g", "", "notification `group` (trigger tag notify:<group>)")
+	fs.StringVar(&o.Notify, "t", "", "`value` of trigger tag notify:<value> used to route alerts (default: \"default\")")
 	fs.StringVar(&o.AgentConfig, "c", "", "Zabbix agent `config` for zabbix_sender (default: autodetect)")
 	fs.StringVar(&o.Hostname, "s", "", "`host` name in Zabbix (default: from agent config)")
 	fs.StringVar(&o.Server, "z", "", "Zabbix `server` or proxy (default: from agent config)")
@@ -178,9 +178,11 @@ func stripExt(s string) string {
 	return s
 }
 
-var unsafe = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
+var unsafe = regexp.MustCompile(`[^A-Za-z0-9_./-]+`)
 
-// Sanitize makes a name safe for use as a Zabbix item key parameter.
+// Sanitize makes a name safe for use as a Zabbix item key parameter, in
+// JSONPath and in macro context: only [A-Za-z0-9_./-] are kept, so a full
+// path such as /opt/scripts/backup.sh is allowed.
 func Sanitize(s string) string {
 	s = strings.Trim(unsafe.ReplaceAllString(s, "_"), "_")
 	if s == "" {
