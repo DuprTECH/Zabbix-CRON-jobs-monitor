@@ -116,6 +116,21 @@ Some distribution jobs are hidden by default, in Zabbix and in `zbxntfy-wrap -li
 
 The wizard lists them at the end as `(system)`, pre-set to `[-]`. Set one to `[x]` if you want it monitored. To show them in Zabbix as well, add `-include-system` to the UserParameter command.
 
+#### Jobs ignored by default
+
+Some jobs report to Zabbix on their own, so wrapping them adds nothing. They are ignored by default:
+
+| Job | Why |
+|---|---|
+| `patchbix-linux`, `patchbix-linux-2`, `patchbix-linux-3` | [PatchBix](https://github.com/DuprTECH/PatchBix-Zabbix-Patch-Management-Windows-Linux) check (`/etc/cron.d/patchbix`: check, after a reboot, `--auto-update`) – it sends its own status to Zabbix |
+
+- `zbxntfy-discovery` doesn't report them, so no **not monitored** problem, even without the wizard (Ansible, `DEBIAN_FRONTEND=noninteractive`).
+- The wizard lists them with the ignored jobs, pre-set to `[-]`, and writes `# zbxntfy:ignore` to the line. Set one to `[x]` to monitor it.
+- `zbxntfy-wrap -list` shows them separately, `-all` leaves them out.
+- The template macro `{$JOB.NAME.NOT_MATCHES}` has the same default, `^patchbix-linux(-\d+)?$`, so they stay hidden with an older `zbxntfy-discovery` too. Add your own names with `|`.
+
+The list is `DefaultIgnoreName` in [internal/crontab/crontab.go](internal/crontab/crontab.go).
+
 #### What `zbxntfy-wrap` guarantees
 
 - **Placement:** `zbxntfy` goes exactly in front of the job's command:

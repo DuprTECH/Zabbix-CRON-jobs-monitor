@@ -113,6 +113,32 @@ bad line here
 	}
 }
 
+func TestIsDefaultIgnored(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "etc/cron.d/patchbix", `37 1,13 * * * root /usr/local/bin/patchbix-linux.sh >/dev/null 2>&1
+@reboot root sleep 300; /usr/local/bin/patchbix-linux.sh >/dev/null 2>&1
+*/15 * * * * root /usr/local/bin/patchbix-linux.sh --auto-update >>/var/log/patchbix-update.log 2>&1
+`)
+	write(t, root, "etc/cron.d/tagged", "0 3 * * * root /opt/patchbix-linux.sh   # zbxntfy:ignore\n")
+	write(t, root, "etc/cron.d/backup", "0 1 * * * root /opt/backup.sh\n")
+
+	jobs, _ := Scanner{Root: root}.Scan()
+	got := map[string]bool{}
+	for i := range jobs {
+		got[jobs[i].Name] = jobs[i].IsDefaultIgnored()
+	}
+	want := map[string]bool{
+		"patchbix-linux": true, "patchbix-linux-2": true, "patchbix-linux-3": true,
+		"patchbix-linux-4": false, // already "# zbxntfy:ignore"
+		"backup":           false,
+	}
+	for n, w := range want {
+		if got[n] != w {
+			t.Errorf("%s: IsDefaultIgnored = %v, want %v (jobs: %v)", n, got[n], w, got)
+		}
+	}
+}
+
 func TestIsDistroJob(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "etc/crontab", `17 *	* * *	root    cd / && run-parts --report /etc/cron.hourly

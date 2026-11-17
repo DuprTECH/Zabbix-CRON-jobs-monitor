@@ -52,8 +52,8 @@ func main() {
 	var jobs []crontab.Job
 	for i := range all {
 		j := &all[i]
-		if j.Monitored == 0 && (j.Ignored || (!*includeSystem && j.IsDistroJob())) {
-			continue // "# zbxntfy:ignore" on the line, or a distribution job
+		if j.Monitored == 0 && (j.Ignored || j.IsDefaultIgnored() || (!*includeSystem && j.IsDistroJob())) {
+			continue // "# zbxntfy:ignore" on the line, ignored by default, or a distribution job
 		}
 		jobs = append(jobs, *j)
 	}

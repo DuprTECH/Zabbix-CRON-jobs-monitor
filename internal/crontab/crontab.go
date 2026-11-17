@@ -409,3 +409,18 @@ func (j *Job) IsDistroJob() bool {
 	}
 	return distroJobName.MatchString(j.Name) || distroJobGuard.MatchString(j.Command)
 }
+
+// DefaultIgnoreName lists jobs that are ignored by default: they report to
+// Zabbix on their own, so wrapping them adds nothing. Discovery hides them,
+// zbxntfy-wrap -list / -all leave them out and the wizard pre-sets them to
+// "ignore" (it writes "# zbxntfy:ignore"). The template macro
+// {$JOB.NAME.NOT_MATCHES} has the same default. Add more names here.
+//   - patchbix-linux: PatchBix check (/etc/cron.d/patchbix: check, after a
+//     reboot, --auto-update), it sends its own status to Zabbix
+var DefaultIgnoreName = regexp.MustCompile(`^patchbix-linux(-\d+)?$`)
+
+// IsDefaultIgnored reports whether the job is not wrapped, has no
+// "# zbxntfy:ignore" yet and is on the DefaultIgnoreName list.
+func (j *Job) IsDefaultIgnored() bool {
+	return j.Monitored == 0 && !j.Ignored && DefaultIgnoreName.MatchString(j.Name)
+}

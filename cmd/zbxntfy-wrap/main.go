@@ -112,11 +112,11 @@ func defaultWrapper() string {
 }
 
 // candidates returns the jobs offered for wrapping: not monitored, not
-// ignored, and no distribution job (unless -system).
+// ignored (also not by default), and no distribution job (unless -system).
 func candidates(jobs []crontab.Job) []crontab.Job {
 	var out []crontab.Job
 	for _, j := range jobs {
-		if j.Monitored == 0 && !j.Ignored && (showSystem || !j.IsDistroJob()) {
+		if j.Monitored == 0 && !j.Ignored && !j.IsDefaultIgnored() && (showSystem || !j.IsDistroJob()) {
 			out = append(out, j)
 		}
 	}
@@ -142,10 +142,13 @@ func listJobs(jobs []crontab.Job) int {
 		}
 	}
 	show("Not monitored (shown in Zabbix as \"not monitored\"):", func(j *crontab.Job) bool {
-		return j.Monitored == 0 && !j.Ignored && !j.IsDistroJob()
+		return j.Monitored == 0 && !j.Ignored && !j.IsDefaultIgnored() && !j.IsDistroJob()
 	})
 	show("Ignored (\"# zbxntfy:ignore\", hidden in Zabbix):", func(j *crontab.Job) bool {
 		return j.Monitored == 0 && j.Ignored
+	})
+	show("Ignored by default (hidden in Zabbix, the wizard adds \"# zbxntfy:ignore\"):", func(j *crontab.Job) bool {
+		return j.IsDefaultIgnored()
 	})
 	if showSystem {
 		show("Distribution jobs (hidden in Zabbix):", func(j *crontab.Job) bool {
@@ -310,7 +313,7 @@ type item struct {
 func wizard(jobs []crontab.Job, c config) int {
 	var items []item
 	monitored := 0
-	// regular jobs first, then ignored, then distribution jobs
+	// regular jobs first, then ignored (also by default, pre-set to ignore), then distribution jobs
 	for pass := 0; pass < 3; pass++ {
 		for _, j := range jobs {
 			if j.Monitored == 1 {
@@ -324,14 +327,14 @@ func wizard(jobs []crontab.Job, c config) int {
 			switch {
 			case d:
 				p = 2
-			case j.Ignored:
+			case j.Ignored || j.IsDefaultIgnored():
 				p = 1
 			}
 			if p != pass {
 				continue
 			}
 			st := stNone
-			if j.Ignored || d {
+			if j.Ignored || j.IsDefaultIgnored() || d {
 				st = stIgnore
 			}
 			items = append(items, item{job: j, distro: d, state: st})

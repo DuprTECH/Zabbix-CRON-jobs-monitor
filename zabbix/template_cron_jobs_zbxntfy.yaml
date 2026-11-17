@@ -594,8 +594,8 @@ zabbix_export:
           value: '.*'
           description: 'Discover only jobs whose name matches.'
         - macro: '{$JOB.NAME.NOT_MATCHES}'
-          value: CHANGE_IF_NEEDED
-          description: 'Do not discover jobs whose name matches, e.g. ^(cron\.(hourly|daily|weekly|monthly)|e2scrub_all)$'
+          value: '^patchbix-linux(-\d+)?$'
+          description: 'Do not discover jobs whose name matches. Default: jobs that report to Zabbix on their own (PatchBix check, /etc/cron.d/patchbix) - the same list zbxntfy-discovery hides and the zbxntfy-wrap wizard pre-sets to ignore. Add more with |, e.g. ^(patchbix-linux(-\d+)?|e2scrub_all)$'
         - macro: '{$JOB.SILENT}'
           value: 8d
           description: 'Alert when a monitored job has not reported any run for this long.'
