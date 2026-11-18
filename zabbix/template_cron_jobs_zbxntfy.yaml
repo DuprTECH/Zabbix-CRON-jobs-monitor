@@ -242,6 +242,7 @@ zabbix_export:
               name: 'Cron job {#JOB}: Last start'
               type: TRAP
               key: 'job.start[{#JOB}]'
+              allowed_hosts: '0.0.0.0/0,::/0'
               history: 31d
               trends: '0'
               units: unixtime
@@ -255,6 +256,7 @@ zabbix_export:
               name: 'Cron job {#JOB}: Last end'
               type: TRAP
               key: 'job.end[{#JOB}]'
+              allowed_hosts: '0.0.0.0/0,::/0'
               history: 31d
               trends: '0'
               units: unixtime
@@ -268,6 +270,7 @@ zabbix_export:
               name: 'Cron job {#JOB}: Duration'
               type: TRAP
               key: 'job.duration[{#JOB}]'
+              allowed_hosts: '0.0.0.0/0,::/0'
               history: 31d
               value_type: FLOAT
               units: s
@@ -280,6 +283,7 @@ zabbix_export:
               name: 'Cron job {#JOB}: Exit code'
               type: TRAP
               key: 'job.rc[{#JOB}]'
+              allowed_hosts: '0.0.0.0/0,::/0'
               history: 31d
               trends: '0'
               description: 'Exit code of the last run; 127 = command not found, 126 = not executable, 128+N = killed by signal N.'
@@ -292,6 +296,7 @@ zabbix_export:
               name: 'Cron job {#JOB}: Output'
               type: TRAP
               key: 'job.log[{#JOB}]'
+              allowed_hosts: '0.0.0.0/0,::/0'
               history: 7d
               value_type: TEXT
               trends: '0'
